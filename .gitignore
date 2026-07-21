@@ -1,0 +1,22 @@
+# Credentials — NEVER commit your real .env
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local test files (moved to test/ folder — not relevant for deployment)
+test/
+
+# Windows launcher
+# run.bat is intentionally tracked — remove this line if you want to exclude it
+# run.bat
+
+# Fly.io local state
+.fly/
+
+# Local debug artifacts
+debug.json
+artistimg.json

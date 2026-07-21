@@ -1,0 +1,13 @@
+# fly.toml app configuration file generated for widgetfm-rizuki on 2026-07-20T21:21:20+08:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'widgetfm-rizuki'
+primary_region = 'sin'
+
+[build]
+[[vm]]
+  memory = '256mb'
+  cpus = 1
+  count = 1

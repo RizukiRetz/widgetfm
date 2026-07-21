@@ -1,0 +1,34 @@
+# File sensitif — JANGAN ikut masuk Docker image
+.env
+
+# Cache gambar DISERTAKAN dalam image (jangan di-exclude!)
+# Ini mencegah script scraping Last.FM di server yang bisa diblokir
+# image_cache.json  ← dibiarkan agar ikut masuk Docker image
+artistimg.json
+debug.json
+statsartistdummy.json
+
+# File testing & debug
+debug_payload.py
+fix_icons.py
+update.py
+profiletest.json
+pushtest.json
+trackstest.json
+tracktest2.json
+
+# File Windows
+run.bat
+*.bat
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Assets lokal (tidak dipakai di server)
+icon/
+
+# Docs
+README.md
+*.md
