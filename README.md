@@ -50,6 +50,19 @@ This project patches Discord's widget API. If you are setting up the widget conf
 
 ---
 
+## Lanyard Setup
+
+This script uses [Lanyard](https://github.com/phineas/lanyard) as the primary album art source (reads your Spotify rich presence from Discord).
+
+**You must join the Lanyard Discord server** to enable monitoring for your account:
+👉 [discord.gg/UrXF2cfJ7F](https://discord.com/invite/UrXF2cfJ7F)
+
+> Alternatively, you can self-host your own Lanyard instance — see [github.com/phineas/lanyard](https://github.com/phineas/lanyard) for instructions.
+
+If your account is not monitored by Lanyard, the script automatically falls back to Spotify → Last.FM for album art. Everything else still works normally.
+
+---
+
 ## Get Started
 
 Open a terminal (PowerShell on Windows, Terminal on macOS/Linux) and run:
@@ -62,15 +75,11 @@ git clone https://github.com/RizukiRetz/widgetfm.git
 cd widgetfm
 
 # 3. Install dependencies
-#    Run this inside the widgetfm folder — it installs all required Python packages
 pip install -r requirements.txt
 
 # 4. Create your config file
-#    Copy the template and fill in your credentials (see Configuration section below)
-cp .env.example .env
+cp .env.example .env    # Windows: copy .env.example .env
 ```
-
-> On Windows, use `copy .env.example .env` instead of `cp`.
 
 After filling in `.env`, run the script:
 
@@ -92,7 +101,7 @@ The widget editor in the Discord Developer Portal is behind an experiment flag. 
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/home) in your **browser**.
 2. Press `Ctrl + Shift + I` (or `Cmd + Option + I` on macOS) to open Developer Tools.
-3. Go to the **Console** tab and paste the following code, then press Enter:
+3. Go to the **Console** tab, paste the code below, and press Enter:
 
 ```js
 let _mods = webpackChunkdiscord_developers.push([[Symbol()],{},r=>r.c]);
@@ -111,7 +120,7 @@ let findByProps = (...props) => {
 findByProps("getAll").getAll().find(e=>e.getName() === "ApexExperimentStore").createOverride("2026-03-widget-config-editor", 1)
 ```
 
-> ⚠️ You need to run this code again every time you refresh or return to the Developer Portal page.
+> ⚠️ Re-run this code every time you refresh or return to the Developer Portal page.
 
 ### Step 2 — Create the Applications
 
@@ -125,62 +134,85 @@ findByProps("getAll").getAll().find(e=>e.getName() === "ApexExperimentStore").cr
 
 In each Discord Application, go to **Games → Widget → Create Widget**.
 
-Then go to the **Content** tab and add each field below. Set **Value Type** to **User Data** and the **Data Field** (key name) to the exact name listed in the table.
+Then go to the **Content** tab and add each field. Set **Value Type** to **User Data** and the **Data Field** to the exact name listed in the tables below.
 
 > ⚠️ **Field names are case-sensitive and must match exactly.**
 
+---
+
 #### Listening Stats widget (Application #1)
+
+**Widget Top** — Image + Title + Subtitle 1 + Subtitle 2 + Subtitle 3
+
+| Field name | Type | Maps to |
+|---|---|---|
+| `bannerwidgettop` | **Image** | Album artwork (updates every track). Set a fallback image. |
+| `nowplaying` | Text / Title | `"Now Playing"` or `"Last Played"` |
+| `nptrack` | Text / Subtitle 1 | Track name |
+| `npartist` | Text / Subtitle 2 | Artist name |
+| `npcount` | Text / Subtitle 3 | Play count + album (e.g. `3 Plays • Music, Fashion, Film`) |
+
+**Widget Bottom** — Stats Grid layout (6 stats, each with Value + Label)
 
 | Field name | Type | Notes |
 |---|---|---|
-| `bannerwidgettop` | **Image** | Album artwork — updates with every track. Set a fallback image. |
-| `nowplaying` | Text | `"Now Playing"` or `"Last Played"` |
-| `nptrack` | Text | Track name |
-| `npartist` | Text | Artist name |
-| `npcount` | Text | Play count + album subtitle (e.g. `3 Plays • Music, Fashion, Film`) |
-| `lsstat1` | Text | Stat slot 1 value (configurable in `config.py`) |
-| `lsstat2` | Text | Stat slot 2 value |
-| `lsstat3` | Text | Stat slot 3 value |
-| `lsstat4` | Text | Stat slot 4 value |
-| `lsstat5` | Text | Stat slot 5 value |
-| `lsstat6` | Text | Stat slot 6 value |
-| `lslabel1` | Text | Stat slot 1 label (auto-generated — set **Value Type** to **User Data**) |
-| `lslabel2` | Text | Stat slot 2 label |
-| `lslabel3` | Text | Stat slot 3 label |
-| `lslabel4` | Text | Stat slot 4 label |
-| `lslabel5` | Text | Stat slot 5 label |
-| `lslabel6` | Text | Stat slot 6 label |
-| `lsmini` | Text | Mini profile stat — combined value + label string (e.g. `28,745 Total Songs`) |
-| `bannermini` | **Image** | Artist photo — updates per artist or track. Set a fallback image. |
+| `lsstat1` | Text / Stat Value | Stat slot 1 value — configurable in `config.py` |
+| `lsstat2` | Text / Stat Value | Stat slot 2 value |
+| `lsstat3` | Text / Stat Value | Stat slot 3 value |
+| `lsstat4` | Text / Stat Value | Stat slot 4 value |
+| `lsstat5` | Text / Stat Value | Stat slot 5 value |
+| `lsstat6` | Text / Stat Value | Stat slot 6 value |
+| `lslabel1` | Text / Stat Label | Stat slot 1 label (auto-generated by script) |
+| `lslabel2` | Text / Stat Label | Stat slot 2 label |
+| `lslabel3` | Text / Stat Label | Stat slot 3 label |
+| `lslabel4` | Text / Stat Label | Stat slot 4 label |
+| `lslabel5` | Text / Stat Label | Stat slot 5 label |
+| `lslabel6` | Text / Stat Label | Stat slot 6 label |
 
-> ⚠️ **Set a default fallback** for `bannerwidgettop` and `bannermini`.
-> This image shows before the first update or when no artwork is available.
+**Mini Profile** — combined value + label
 
-> ⚠️ **Subtitle 3 on Widget Top** — if your widget layout uses a Subtitle 3 field, set its **Value Type** to **Custom String** and enter a static text (e.g. your Last.FM profile URL like `last.fm/user/YourUsername`). Leaving it empty or as User Data with no fallback will cause a **skeleton loading animation** that never resolves.
+| Field name | Type | Notes |
+|---|---|---|
+| `lsmini` | Text | Single combined string (e.g. `28,745 Total Songs`). Label toggle: **off** in Discord editor. |
+| `bannermini` | **Image** | Artist photo (updates per artist or track). Set a fallback image. |
+
+> ⚠️ **Set a default fallback image** for `bannerwidgettop` and `bannermini`. This shows before the first update or when no artwork is available.
+
+---
 
 #### Top Artists widget (Application #2)
 
-| Field name | Type | Description |
+**Widget Top** — Image + Title + Subtitle 1 + Subtitle 2 + Subtitle 3
+
+| Field name | Type | Example value |
 |---|---|---|
 | `1artistimg` | **Image** | #1 artist photo |
+| `1artisttitle` | Text / Title | `#1 Holly Humberstone (All Time)` |
+| `1minutesplayed` | Text / Subtitle 1 | `1,234 Minutes Listened` |
+| `1genre` | Text / Subtitle 2 | `Indie Pop, Singer-Songwriter` |
+| `tasubtitle3` | Text / Subtitle 3 | `stats.fm/YourUsername` (auto-generated, see below) |
+
+**Widget Bottom** — Collection layout (artists #2–#5)
+
+| Field name | Type | Example value |
+|---|---|---|
 | `2artistimg` | **Image** | #2 artist photo |
+| `2artisttitle` | Text | `#2 Olivia Rodrigo` |
+| `2minutesplayed` | Text | `987 Minutes Listened` |
 | `3artistimg` | **Image** | #3 artist photo |
+| `3artisttitle` | Text | `#3 Gracie Abrams` |
+| `3minutesplayed` | Text | `654 Minutes Listened` |
 | `4artistimg` | **Image** | #4 artist photo |
+| `4artisttitle` | Text | `#4 Clairo` |
+| `4minutesplayed` | Text | `321 Minutes Listened` |
 | `5artistimg` | **Image** | #5 artist photo |
-| `1artisttitle` | Text | e.g. `#1 Holly Humberstone (All Time)` |
-| `2artisttitle` | Text | e.g. `#2 Olivia Rodrigo` |
-| `3artisttitle` | Text | e.g. `#3 Gracie Abrams` |
-| `4artisttitle` | Text | e.g. `#4 Clairo` |
-| `5artisttitle` | Text | e.g. `#5 Phoebe Bridgers` |
-| `1minutesplayed` | Text | e.g. `1,234 Minutes Listened` |
-| `2minutesplayed` | Text | e.g. `987 Minutes Listened` |
-| `3minutesplayed` | Text | e.g. `654 Minutes Listened` |
-| `4minutesplayed` | Text | e.g. `321 Minutes Listened` |
-| `5minutesplayed` | Text | e.g. `100 Minutes Listened` |
-| `1genre` | Text | Top artist's genre(s) (rank #1 only) |
+| `5artisttitle` | Text | `#5 Phoebe Bridgers` |
+| `5minutesplayed` | Text | `100 Minutes Listened` |
 
 > ⚠️ **Set a default fallback image** for all five `{n}artistimg` fields.
-> These show before the first update or when no pool image is available for an artist.
+
+> ℹ️ **`tasubtitle3` (Subtitle 3 of Widget Top)** — By default, the script auto-generates `stats.fm/{STATSFM_USERNAME}` from your `.env`. To display a different link or text, set `TA_SUBTITLE3 = "your text here"` in `config.py`.
+> In the Discord widget editor, set this field's **Value Type** to **User Data**, **Data Field**: `tasubtitle3`.
 
 ### Step 4 — Apply the Application Identity
 
@@ -207,11 +239,11 @@ Copy `.env.example` to `.env` and fill in your credentials:
 | `TOPARTISTS_BOT_TOKEN` | ✅ | Discord Developer Portal → Application #2 → Bot → Reset Token |
 | `STATSFM_USERNAME` | ⚪ Optional | Required for Top Artists widget and `hoursstreamed`/`minutesstreamed` stat slots |
 | `DISCORD_IMAGE_WEBHOOK_URL` | ⚪ Optional | Required when `IMGFIXER_ENABLED = True` in `config.py` |
-| `SPOTIFY_CLIENT_ID` | ⚪ Optional | [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) — for album art fallback |
+| `SPOTIFY_CLIENT_ID` | ⚪ Optional | [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) — album art fallback |
 | `SPOTIFY_CLIENT_SECRET` | ⚪ Optional | Same app as above |
 | `SPOTIFY_REFRESH_TOKEN` | ⚪ Optional | Run `python spotify_auth.py` once after setting the two above |
 
-Additional settings (intervals, stat slot types, rotation, image pool size, blacklisted image hashes) can be tuned in [`config.py`](config.py).
+Additional settings (intervals, stat slot types, rotation, `TA_SUBTITLE3`, image pool size, blacklisted image hashes) can be tuned in [`config.py`](config.py).
 
 ---
 

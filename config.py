@@ -172,6 +172,12 @@ STATIC_INTERVAL    = 120   # seconds between refreshes when rotation is OFF
 ROTATION_ORDER  = ["lifetime", "months", "weeks"]
 ROTATION_LABELS = {"lifetime": "All Time", "months": "6 Months", "weeks": "30 Days"}
 
+# ── Top Artists — Widget Top Subtitle 3 ──────────────────────────────────────
+# Text shown in Subtitle 3 of the Top Artists Widget Top section.
+# Leave empty ("") → auto-generates "stats.fm/{STATSFM_USERNAME}"
+# Set a custom string to override, e.g. "last.fm/user/YourUsername"
+TA_SUBTITLE3 = ""
+
 # ── Image cache ───────────────────────────────────────────────────────────────
 IMAGE_CACHE_FILE     = "image_cache.json"
 IMAGE_CACHE_TTL_DAYS = 30   # days before re-scraping Last.FM for an artist's images

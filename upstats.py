@@ -1035,6 +1035,11 @@ def run_top_artists() -> None:
                 if i == 1 and genre_str:
                     dynamic.append({"type": 1, "name": "1genre", "value": genre_str})
 
+            # Subtitle 3: configurable profile link or custom text from config.py
+            _ta_sub3 = TA_SUBTITLE3 or (f"stats.fm/{STATSFM_USERNAME}" if STATSFM_USERNAME else "")
+            if _ta_sub3:
+                dynamic.append({"type": 1, "name": "tasubtitle3", "value": _ta_sub3})
+
             if TOPARTISTS_ROTATE:
                 print(f"[TA] Rotation → {range_label}")
                 discordPatch(TA_APPLICATION_ID, TA_BOT_TOKEN, {"data": {"dynamic": dynamic}}, "TA")
