@@ -1,3 +1,4 @@
 requests
 beautifulsoup4
 python-dotenv
+Pillow>=10.0.0   # required when IMGFIXER_ENABLED = True in config.py
