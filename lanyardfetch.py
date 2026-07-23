@@ -36,8 +36,11 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
-def get_lanyard_album_art(user_id: str, np_track: str, np_artist: str) -> str | None:
-    """Return the 640×640 Spotify album art URL from Lanyard for np_track/np_artist.
+def get_lanyard_album_art(user_id: str, np_track: str, np_artist: str) -> tuple[str | None, str | None]:
+    """Return (album_art_url, album_name) from Lanyard for np_track/np_artist.
+
+    Both values come from Spotify Rich Presence via Discord and are available
+    immediately — even for newly released tracks before Last.FM has indexed them.
 
     Performs a normalized track-name match so special characters in song titles
     ('+', '=', '<3', etc.) never cause a mismatch between Last.FM and Lanyard data.
@@ -45,7 +48,7 @@ def get_lanyard_album_art(user_id: str, np_track: str, np_artist: str) -> str | 
     Multi-artist tracks: Lanyard joins artists with '; ' — we don't match on artist,
     only on song name, to avoid false negatives from separator differences.
 
-    Returns None when:
+    Returns (None, None) when:
       - `user_id` is empty
       - User is not monitored by Lanyard
       - User is offline / invisible on Discord
@@ -54,7 +57,7 @@ def get_lanyard_album_art(user_id: str, np_track: str, np_artist: str) -> str | 
       - Any network / timeout error
     """
     if not user_id:
-        return None
+        return None, None
 
     try:
         r = requests.get(f"{LANYARD_API}/{user_id}", timeout=6)
@@ -70,30 +73,31 @@ def get_lanyard_album_art(user_id: str, np_track: str, np_artist: str) -> str | 
             if err == "user_not_monitored":
                 # This won't fix itself — log once-ish via caller, not every poll
                 pass
-            return None
+            return None, None
 
         payload = data.get("data", {})
 
         # Offline / invisible → Discord hides all presence data
         if payload.get("discord_status") == "offline":
-            return None
+            return None, None
 
         # Not listening to Spotify (nothing playing, paused, Private Session)
         if not payload.get("listening_to_spotify"):
-            return None
+            return None, None
 
         sp = payload.get("spotify")
         if not sp:
-            return None
+            return None, None
 
         # Normalized track name match — handles special characters safely
         spotify_song = sp.get("song", "")
         if _norm(spotify_song) != _norm(np_track):
-            return None   # different track on Spotify vs Last.FM display
+            return None, None   # different track on Spotify vs Last.FM display
 
-        art_url = sp.get("album_art_url")
-        return art_url or None
+        art_url    = sp.get("album_art_url") or None
+        album_name = sp.get("album", "").strip() or None
+        return art_url, album_name
 
     except Exception as exc:
         print(f"[Lanyard] Error: {exc}")
-        return None
+        return None, None

@@ -694,6 +694,7 @@ def run_listening_stats() -> None:
     prev_art_key:       tuple    = ()    # (np_track, np_artist)
     lanyard_fetched:    bool     = False # True = tried Lanyard for this track
     cached_lanyard_url: str | None = None
+    cached_lanyard_album: str | None = None  # album name from Lanyard (Spotify Rich Presence)
     spotify_fetched:    bool     = False # True = tried Spotify for this track
     cached_spotify_url: str | None = None
 
@@ -765,11 +766,12 @@ def run_listening_stats() -> None:
 
             art_key = (np_track, np_artist)
             if art_key != prev_art_key:
-                cached_lanyard_url = None
-                lanyard_fetched    = False
-                cached_spotify_url = None
-                spotify_fetched    = False
-                prev_art_key       = art_key
+                cached_lanyard_url   = None
+                cached_lanyard_album = None
+                lanyard_fetched      = False
+                cached_spotify_url   = None
+                spotify_fetched      = False
+                prev_art_key         = art_key
                 if DEBUG: print(f"[LS] Art cache cleared: {np_track}")
 
             # Priority 1 — Lanyard: Discord presence, 640×640, no auth, free.
@@ -777,10 +779,11 @@ def run_listening_stats() -> None:
             # Try once for 'Last Played' (track won't match Spotify presence).
             if cached_lanyard_url is None and _lanyard_available:
                 if not lanyard_fetched or now_playing == "Now Playing":
-                    _art = _get_lanyard_art(USER_ID, np_track, np_artist)
+                    _art, _lanyard_album = _get_lanyard_art(USER_ID, np_track, np_artist)
                     lanyard_fetched = True
                     if _art:
-                        cached_lanyard_url = _art
+                        cached_lanyard_url   = _art
+                        cached_lanyard_album = _lanyard_album
                         print("[LS] bannerwidgettop: Lanyard")
             banner_url = cached_lanyard_url
 
@@ -881,6 +884,12 @@ def run_listening_stats() -> None:
                       and scrobble_album
                       and scrobble_album.lower() != np_track.lower()):
                     album_title = scrobble_album
+
+                # 3rd fallback: Lanyard carries spotify.album from Discord Rich Presence.
+                # Available immediately — even for newly released tracks Last.FM hasn't indexed.
+                if not album_title and cached_lanyard_album:
+                    album_title = cached_lanyard_album
+                    if DEBUG: print(f"[LS] npcount: album from Lanyard → '{album_title}'")
 
                 cached_npcount      = format_npcount(count, album_title, np_track)
                 prev_npcount_key    = npcount_key
@@ -1071,6 +1080,14 @@ if __name__ == "__main__":
         print("[TA] WARNING: STATSFM_USERNAME not set → Top Artists widget disabled")
         effective_ta = False
 
+    if effective_ta and not (TA_APPLICATION_ID and TA_BOT_TOKEN):
+        print("[TA] WARNING: TOPARTISTS_APPLICATION_ID or TOPARTISTS_BOT_TOKEN not set → Top Artists widget disabled")
+        effective_ta = False
+
+    if effective_ls and not (LS_APPLICATION_ID and LS_BOT_TOKEN):
+        print("[LS] WARNING: APPLICATION_ID or BOT_TOKEN not set → Listening Stats widget disabled")
+        effective_ls = False
+
     if not effective_ls and not effective_ta:
         print("[ERROR] Both widgets are disabled. Set at least one to True in config.py.")
         sys.exit(1)
@@ -1078,13 +1095,17 @@ if __name__ == "__main__":
     # ── Startup banner ───────────────────────────────────────────────────────────
     ls_status = (
         f"✓ fast={LS_FAST_INTERVAL}s / slow={LS_SLOW_INTERVAL}s"
-        if effective_ls else "✗ disabled"
+        if effective_ls else
+        "✗ disabled"                      if not ENABLE_LISTENING_STATS else
+        "✗ APPLICATION credentials missing"
     )
     ta_status = (
         f"✓ {ta_mode}"     if effective_ta else
         "✗ disabled"      if not ENABLE_TOP_ARTISTS else
-        "✗ STATSFM_USERNAME not set"
+        "✗ STATSFM_USERNAME not set"       if not STATSFM_USERNAME else
+        "✗ TOPARTISTS credentials missing"
     )
+
     print("=" * 55)
     print("   WidgetFM — Starting")
     print(f"   Listening Stats : {ls_status}")

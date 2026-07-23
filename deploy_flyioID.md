@@ -18,7 +18,7 @@ Atau download manual dari: https://fly.io/docs/hands-on/install-flyctl/
 
 Verifikasi instalasi:
 ```powershell
-fly version
+flyctl version
 ```
 
 ---
@@ -26,7 +26,7 @@ fly version
 ## Langkah 2 — Login ke Fly.io
 
 ```powershell
-fly auth login
+flyctl auth login
 ```
 
 Browser akan terbuka untuk login/signup.
@@ -37,7 +37,7 @@ Browser akan terbuka untuk login/signup.
 
 ```powershell
 cd e:\Bot\widgetfm
-fly launch --no-deploy
+flyctl launch --no-deploy
 ```
 
 Fly.io akan bertanya:
@@ -52,30 +52,64 @@ Ini akan membuat file `fly.toml` secara otomatis.
 
 ## Langkah 4 — Set Secrets (API Keys & Tokens)
 
-**JANGAN taruh .env di server** — gunakan Fly.io secrets sebagai gantinya:
+**JANGAN taruh .env di server** — gunakan Fly.io secrets sebagai gantinya.
+Secrets disimpan terenkripsi di Fly.io dan tidak akan pernah terlihat setelah di-set.
 
 ```powershell
-fly secrets set `
+flyctl secrets set `
   LAST_FM_USERNAME="(username Last.FM kamu)" `
   API_KEY="(Last.FM API key kamu)" `
   USER_ID="(Discord user ID kamu)" `
-  STATSFM_USERNAME="(username stats.fm kamu)" `
   APPLICATION_ID="(Application ID widget Listening Stats)" `
   BOT_TOKEN="(Bot Token widget Listening Stats)" `
   TOPARTISTS_APPLICATION_ID="(Application ID widget Top Artists)" `
   TOPARTISTS_BOT_TOKEN="(Bot Token widget Top Artists)"
 ```
 
+**Secrets opsional** — tambahkan hanya jika kamu menggunakan fitur ini:
+
+```powershell
+# stats.fm — wajib untuk widget Top Artists dan slot hoursstreamed/minutesstreamed
+flyctl secrets set STATSFM_USERNAME="(username stats.fm kamu)"
+
+# Spotify — fallback album art (jalankan spotify_auth.py di lokal dulu)
+flyctl secrets set `
+  SPOTIFY_CLIENT_ID="(Spotify Client ID)" `
+  SPOTIFY_CLIENT_SECRET="(Spotify Client Secret)" `
+  SPOTIFY_REFRESH_TOKEN="(Spotify Refresh Token)"
+
+# imgfixer — wajib hanya jika IMGFIXER_ENABLED = True di config.py
+flyctl secrets set DISCORD_IMAGE_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+```
+
 > Lihat file `.env.example` untuk deskripsi lengkap setiap variabel.
 
-Secrets disimpan terenkripsi di Fly.io dan tidak akan pernah terlihat setelah di-set.
+> ⚠️ **Spotify auth harus dilakukan di lokal.** `spotify_auth.py` membuka browser dan menjalankan HTTP server lokal — tidak bisa berjalan di Fly.io. Dapatkan refresh token di lokal dulu (`python spotify_auth.py`), lalu tambahkan sebagai secret di atas.
+
+---
+
+## Langkah 4b — Menambahkan Secrets ke App yang Sudah Ter-deploy
+
+Jika kamu sudah deploy sebelumnya dan ingin menambahkan secrets baru (misal Spotify keys yang baru ditambahkan):
+
+```powershell
+# Set satu atau beberapa secrets — Fly.io akan otomatis redeploy
+flyctl secrets set SPOTIFY_CLIENT_ID="..." SPOTIFY_CLIENT_SECRET="..." SPOTIFY_REFRESH_TOKEN="..."
+```
+
+Untuk menambahkan beberapa secrets sekaligus tanpa memicu redeploy berulang, gabungkan dalam satu command seperti di atas — Fly.io hanya redeploy sekali.
+
+Untuk melihat secrets yang sudah ter-set (nilainya tersembunyi):
+```powershell
+flyctl secrets list
+```
 
 ---
 
 ## Langkah 5 — Deploy
 
 ```powershell
-fly deploy
+flyctl deploy
 ```
 
 Fly.io akan:
@@ -89,19 +123,19 @@ Fly.io akan:
 ## Monitoring — Cek Log Real-Time
 
 ```powershell
-fly logs
+flyctl logs
 ```
 
-Output yang normal:
+Output normal saat startup:
 ```
-[TA] Thread dimulai
-[LS] Thread dimulai
-[Cache] Loaded: 0 artist dari image_cache.json
-[TA] Artist baru terdeteksi, load pool untuk 5 artist...
-[TA] Fetch Last.FM untuk 'Holly Humberstone'...
-[TA] Pool 'Holly Humberstone': 40 gambar (Last.FM, cache disimpan)
-...
-[LS] Status: Now Playing | GIRLI — Pedestal
+=======================================================
+   WidgetFM — Starting
+   Listening Stats : ✓ fast=20s / slow=60s
+   Top Artists     : ✓ rotate=ON | All Time → 6 Months → 30 Days | 25s/step
+=======================================================
+[Cache] Global cache ready: 12 artist(s) cached
+[LS] Thread started
+[LS] Status: Now Playing | Some Song — Some Artist
 [LS] Discord → 204 | Rate: 2/3 remaining, resets in 20.0s
 ```
 
@@ -111,27 +145,37 @@ Output yang normal:
 
 | Perintah | Fungsi |
 |---|---|
-| `fly logs` | Lihat log real-time |
-| `fly status` | Cek status app (running/stopped) |
-| `fly restart` | Restart script |
-| `fly secrets list` | Lihat nama secrets (nilai tersembunyi) |
-| `fly secrets set KEY=VALUE` | Update satu secret |
-| `fly scale count 1` | Pastikan 1 instance berjalan |
-| `fly dashboard` | Buka dashboard web |
+| `flyctl logs` | Lihat log real-time |
+| `flyctl status` | Cek status app (running/stopped) |
+| `flyctl restart` | Restart script |
+| `flyctl secrets list` | Lihat nama secrets (nilai tersembunyi) |
+| `flyctl secrets set KEY=VALUE` | Update satu secret |
+| `flyctl scale count 0` | Stop server (sebelum run lokal) |
+| `flyctl scale count 1` | Pastikan 1 instance berjalan |
+| `flyctl deploy` | Re-deploy setelah ada perubahan kode atau cache |
+| `flyctl open` | Buka dashboard web Fly.io |
 
 ---
 
 ## Catatan Penting
 
 ### Image Cache
-Di server, `image_cache.json` dibuat ulang saat startup (karena tidak ada persistent storage).  
-Ini hanya membutuhkan ~10-15 detik ekstra di awal — **tidak masalah**.
 
-Jika ingin cache persisten (opsional):
-```powershell
-fly volumes create widgetfm_data --size 1 --region sin
-```
-Lalu update `fly.toml` dan `IMAGE_CACHE_FILE` di `upstats.py`. Ini opsional.
+`image_cache.json` di-commit ke repository dan dibundel ke Docker image saat deploy.
+Setiap URL gambar artist di-cache selama 30 hari (bisa diubah di `config.py`).
+Untuk refresh cache yang expired, jalankan script di lokal beberapa saat lalu re-deploy.
+
+> ⚠️ **Scraping Last.FM dari Fly.io:** IP datacenter Fly.io kemungkinan di-rate-limit oleh Last.FM untuk scraping gambar. Karena `image_cache.json` sudah dibundel saat deploy, server tidak perlu scraping untuk artist yang sudah di-cache. Untuk artist baru yang belum ter-cache atau cache-nya sudah expired, fallback-nya adalah tidak ada gambar — widget akan menampilkan gambar default fallback-nya.
+
+### Running Lokal vs Server
+
+**Jangan jalankan script di lokal dan di server secara bersamaan.**
+Keduanya akan meng-patch widget Discord yang sama secara simultan, menyebabkan konflik dan konsumsi rate limit dua kali lipat.
+
+Alur yang disarankan:
+1. `flyctl scale count 0` — stop server
+2. Jalankan di lokal untuk testing atau build cache
+3. `flyctl deploy` — re-deploy (otomatis start server dengan 1 instance)
 
 ### Auto-restart
 Fly.io otomatis me-restart container jika crash. Script tidak akan mati permanen.
@@ -147,12 +191,12 @@ Fly.io otomatis me-restart container jika crash. Script tidak akan mati permanen
 
 ```powershell
 # Lihat detail error
-fly logs --tail
+flyctl logs --tail
 
 # Build ulang tanpa cache
-fly deploy --no-cache
+flyctl deploy --no-cache
 
 # Reset app dan coba lagi
-fly apps destroy widgetfm-rizukiretz
-fly launch --no-deploy
+flyctl apps destroy widgetfm-rizukiretz
+flyctl launch --no-deploy
 ```

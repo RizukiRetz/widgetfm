@@ -1,6 +1,6 @@
 # WidgetFM
 
-Real-time Discord profile widget that displays your Last.FM listening stats and top artists, powered by [stats.fm](https://stats.fm) and the Discord widget API.
+Real-time Discord profile widget that displays your Last.FM listening stats and top artists — with album art sourced from Lanyard, Spotify, and Last.FM.
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
@@ -9,7 +9,9 @@ Real-time Discord profile widget that displays your Last.FM listening stats and 
 
 ## Showcase
 
-![Listening Stats Widget](showcase/retzlswidgetshowcase.png)
+![Listening Stats Mini Profile](showcase/minigif.gif)
+
+![Now Playing Widget](showcase/npgif.gif)
 
 ![Top Artists Widget](showcase/retztawidgetshowcase.gif)
 
@@ -17,10 +19,12 @@ Real-time Discord profile widget that displays your Last.FM listening stats and 
 
 ## Features
 
-- **Listening Stats widget** — Now Playing / Last Played track, scrobble count, hours streamed, and more
+- **Listening Stats widget** — Now Playing / Last Played track, scrobble count, play count subtitle, and six fully configurable stat slots (scrobbles, top artists/tracks/albums, hours/minutes listened, etc.)
 - **Top Artists widget** — Your top 5 artists across three time ranges (All Time / 6 Months / 30 Days), rotating every 25 seconds
+- **Three-source album art priority chain** — Lanyard (Discord Rich Presence, 640×640) → Spotify API → Last.FM (automatic fallback per track)
 - **Dynamic artist images** — Scraped from Last.FM's photo gallery, with AudioDB as a fallback; served through [wsrv.nl](https://wsrv.nl) for consistent sizing
 - **Smart image caching** — Locally built cache is bundled into the Docker image so the server never needs to scrape Last.FM directly
+- **Configurable stat slots** — All six stat display slots are configurable from `config.py` without touching any other code
 - **24/7 deployment** — Ships with a `Dockerfile` and a guide for [Fly.io](https://fly.io) free-tier hosting
 
 ---
@@ -30,8 +34,9 @@ Real-time Discord profile widget that displays your Last.FM listening stats and 
 - Python 3.11 or later (download from [python.org](https://www.python.org/downloads/))
 - Git (download from [git-scm.com](https://git-scm.com/downloads))
 - A [Last.FM](https://www.last.fm) account with API access
-- A [stats.fm](https://stats.fm) account
 - Two Discord Applications (one per widget)
+- *(Optional)* A [Spotify](https://developer.spotify.com/dashboard) app — for album art fallback when Last.FM has no artwork
+- *(Optional)* A [stats.fm](https://stats.fm) account — required only for the Top Artists widget and `hoursstreamed` / `minutesstreamed` stat slots
 - *(Optional)* A [Fly.io](https://fly.io) account for 24/7 hosting
 
 ---
@@ -126,22 +131,29 @@ Then go to the **Content** tab and add each field below. Set **Value Type** to *
 
 #### Listening Stats widget (Application #1)
 
-| Field name | Type | Description |
+| Field name | Type | Notes |
 |---|---|---|
-| `bannerwidgettop` | **Image** | Album artwork — updates with every track |
+| `bannerwidgettop` | **Image** | Album artwork — updates with every track. Set a fallback image. |
 | `nowplaying` | Text | `"Now Playing"` or `"Last Played"` |
 | `nptrack` | Text | Track name |
 | `npartist` | Text | Artist name |
-| `scrobbles` | Text | Total scrobble count |
-| `hoursstreamed` | Text | Total hours streamed (from stats.fm) |
-| `minutesstreamed` | Text | Total minutes streamed (from stats.fm) |
-| `totalalbums` | Text | Total album count |
-| `totalartists` | Text | Total unique artist count |
-| `totaltracks` | Text | Total unique track count |
-| `totaltrackmini` | Text | e.g. `28,738 Total Songs` |
-| `bannermini` | **Image** | Artist photo — updates per artist or track |
+| `npcount` | Text | Play count + album subtitle (e.g. `3 Plays • Music, Fashion, Film`) |
+| `lsstat1` | Text | Stat slot 1 value (configurable in `config.py`) |
+| `lsstat2` | Text | Stat slot 2 value |
+| `lsstat3` | Text | Stat slot 3 value |
+| `lsstat4` | Text | Stat slot 4 value |
+| `lsstat5` | Text | Stat slot 5 value |
+| `lsstat6` | Text | Stat slot 6 value |
+| `lslabel1` | Text | Stat slot 1 label (auto-generated — set **Value Type** to **User Data**) |
+| `lslabel2` | Text | Stat slot 2 label |
+| `lslabel3` | Text | Stat slot 3 label |
+| `lslabel4` | Text | Stat slot 4 label |
+| `lslabel5` | Text | Stat slot 5 label |
+| `lslabel6` | Text | Stat slot 6 label |
+| `lsmini` | Text | Mini profile stat — combined value + label string (e.g. `28,745 Total Songs`) |
+| `bannermini` | **Image** | Artist photo — updates per artist or track. Set a fallback image. |
 
-> ⚠️ **Set a default fallback** for `bannerwidgettop` and `bannermini`.  
+> ⚠️ **Set a default fallback** for `bannerwidgettop` and `bannermini`.
 > This image shows before the first update or when no artwork is available.
 
 > ⚠️ **Subtitle 3 on Widget Top** — if your widget layout uses a Subtitle 3 field, set its **Value Type** to **Custom String** and enter a static text (e.g. your Last.FM profile URL like `last.fm/user/YourUsername`). Leaving it empty or as User Data with no fallback will cause a **skeleton loading animation** that never resolves.
@@ -167,7 +179,7 @@ Then go to the **Content** tab and add each field below. Set **Value Type** to *
 | `5minutesplayed` | Text | e.g. `100 Minutes Listened` |
 | `1genre` | Text | Top artist's genre(s) (rank #1 only) |
 
-> ⚠️ **Set a default fallback image** for all five `{n}artistimg` fields.  
+> ⚠️ **Set a default fallback image** for all five `{n}artistimg` fields.
 > These show before the first update or when no pool image is available for an artist.
 
 ### Step 4 — Apply the Application Identity
@@ -184,18 +196,33 @@ Follow the guide under **"Adding the Widget to your Profile"** to pin both widge
 
 Copy `.env.example` to `.env` and fill in your credentials:
 
-| Variable | Where to find it |
-|---|---|
-| `LAST_FM_USERNAME` | Your Last.FM username |
-| `API_KEY` | [last.fm/api/account/create](https://www.last.fm/api/account/create) |
-| `STATSFM_USERNAME` | Your stats.fm username (from your profile URL) |
-| `USER_ID` | Discord → Settings → Advanced → Developer Mode → right-click your profile |
-| `APPLICATION_ID` | Discord Developer Portal → Application #1 → General Information |
-| `BOT_TOKEN` | Discord Developer Portal → Application #1 → Bot → Reset Token |
-| `TOPARTISTS_APPLICATION_ID` | Discord Developer Portal → Application #2 → General Information |
-| `TOPARTISTS_BOT_TOKEN` | Discord Developer Portal → Application #2 → Bot → Reset Token |
+| Variable | Required | Where to find it |
+|---|---|---|
+| `LAST_FM_USERNAME` | ✅ | Your Last.FM username |
+| `API_KEY` | ✅ | [last.fm/api/account/create](https://www.last.fm/api/account/create) |
+| `USER_ID` | ✅ | Discord → Settings → Advanced → Developer Mode → right-click your profile |
+| `APPLICATION_ID` | ✅ | Discord Developer Portal → Application #1 → General Information |
+| `BOT_TOKEN` | ✅ | Discord Developer Portal → Application #1 → Bot → Reset Token |
+| `TOPARTISTS_APPLICATION_ID` | ✅ | Discord Developer Portal → Application #2 → General Information |
+| `TOPARTISTS_BOT_TOKEN` | ✅ | Discord Developer Portal → Application #2 → Bot → Reset Token |
+| `STATSFM_USERNAME` | ⚪ Optional | Required for Top Artists widget and `hoursstreamed`/`minutesstreamed` stat slots |
+| `DISCORD_IMAGE_WEBHOOK_URL` | ⚪ Optional | Required when `IMGFIXER_ENABLED = True` in `config.py` |
+| `SPOTIFY_CLIENT_ID` | ⚪ Optional | [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) — for album art fallback |
+| `SPOTIFY_CLIENT_SECRET` | ⚪ Optional | Same app as above |
+| `SPOTIFY_REFRESH_TOKEN` | ⚪ Optional | Run `python spotify_auth.py` once after setting the two above |
 
-Additional settings (intervals, rotation, image pool size, blacklisted image hashes) can be tuned in [`config.py`](config.py).
+Additional settings (intervals, stat slot types, rotation, image pool size, blacklisted image hashes) can be tuned in [`config.py`](config.py).
+
+---
+
+## Spotify Setup (Optional)
+
+Spotify is used as a fallback album art source when Last.FM has no artwork for a track.
+
+1. Create a Spotify app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+2. Add `http://127.0.0.1:8888/callback` as a Redirect URI in the app settings
+3. Copy `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` to `.env`
+4. Run `python spotify_auth.py` once — it opens a browser and saves your refresh token automatically
 
 ---
 

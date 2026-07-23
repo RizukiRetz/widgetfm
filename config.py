@@ -18,11 +18,11 @@ TA_APPLICATION_ID = os.getenv("TOPARTISTS_APPLICATION_ID")
 TA_BOT_TOKEN      = os.getenv("TOPARTISTS_BOT_TOKEN")
 
 # ── Widget toggles ──────────────────────────────────────────────────────────────
-# True  = widget thread dijalankan saat startup
-# False = widget di-skip
+# True  = widget thread is started on launch
+# False = widget is skipped entirely
 #
-# Catatan: ENABLE_TOP_ARTISTS = True membutuhkan STATSFM_USERNAME di .env.
-# Jika kosong, Top Artists di-skip otomatis dengan peringatan di console.
+# Note: ENABLE_TOP_ARTISTS = True requires STATSFM_USERNAME in .env.
+# If left empty, Top Artists is auto-disabled with a warning at startup.
 ENABLE_LISTENING_STATS = True
 ENABLE_TOP_ARTISTS     = True
 
@@ -90,42 +90,44 @@ NPCOUNT_SPLIT_LINES = False
 #   "7 Plays • It Took Me Falling in Lo..." (36 chars) → 1 line ✓
 #   "168 Plays • Live From Mother Earth..." (36 chars) → 1 line ✓
 #   (old value was 32 with "Scrobbles"; +4 for the shorter word)
-NPCOUNT_TOTAL_MAX_LEN = 36
+NPCOUNT_TOTAL_MAX_LEN = 34
 
 # ── Intervals (seconds) ──────────────────────────────────────────────────────────────
 LS_FAST_INTERVAL = 20   # how often to poll Last.FM for recent tracks
 LS_SLOW_INTERVAL = 60   # how often to refresh user info & top stats
 
-# ── Listening Stats — Configurable Stat Slots ────────────────────────────────────
-# Setiap slot menampilkan data yang dikonfigurasi di sini. Label digenerate
-# otomatis oleh script dan dikirim ke Discord sebagai field lslabel1..lslabel6.
-# lsmini menggabungkan value + label menjadi satu string (label off di Discord editor).
+# ── Listening Stats — Configurable Stat Slots ─────────────────────────────────────────
+# Each slot displays the data configured here. Labels are auto-generated
+# by the script and pushed to Discord as fields lslabel1..lslabel6.
+# lsmini combines value + label into a single string (label is off in Discord editor).
 #
 # TYPE options:
-#   "scrobbles"       → Total scrobbles     (Last.FM, period diabaikan)
-#   "totalalbums"     → Total album unik    (Last.FM, period diabaikan)
-#   "totalartists"    → Total artis unik    (Last.FM, period diabaikan)
-#   "totaltracks"     → Total lagu unik     (Last.FM, period diabaikan)
-#   "topartist"       → Top Artist #1       (Last.FM, period dipakai)
-#   "toptrack"        → Top Song #1         (Last.FM, period dipakai)
-#   "topalbum"        → Top Album #1        (Last.FM, period dipakai)
-#   "hoursstreamed"   → Hours Listened      (stats.fm, butuh STATSFM_USERNAME)
-#   "minutesstreamed" → Minutes Listened    (stats.fm, butuh STATSFM_USERNAME)
+#   "scrobbles"       → Total scrobbles     (Last.FM, period ignored)
+#   "totalalbums"     → Total unique albums  (Last.FM, period ignored)
+#   "totalartists"    → Total unique artists (Last.FM, period ignored)
+#   "totaltracks"     → Total unique tracks  (Last.FM, period ignored)
+#   "topartist"       → Top Artist #1        (Last.FM, period used)
+#   "toptrack"        → Top Song #1          (Last.FM, period used)
+#   "topalbum"        → Top Album #1         (Last.FM, period used)
+#   "hoursstreamed"   → Hours Listened       (stats.fm, requires STATSFM_USERNAME)
+#   "minutesstreamed" → Minutes Listened     (stats.fm, requires STATSFM_USERNAME)
 #
-# PERIOD options (hanya berlaku untuk topartist/toptrack/topalbum):
+# PERIOD options (only applies to topartist / toptrack / topalbum):
 #   "overall" | "7day" | "1month" | "3month" | "6month" | "12month"
 
-LS_STAT1_TYPE,  LS_STAT1_PERIOD  = "scrobbles",    "overall"  # → "253K"   label: Scrobbles
-LS_STAT2_TYPE,  LS_STAT2_PERIOD  = "topartist",    "1month"   # → artist  label: Top Artist (30-Day)
-LS_STAT3_TYPE,  LS_STAT3_PERIOD  = "toptrack",     "1month"   # → track   label: Top Song (30-Day)
-LS_STAT4_TYPE,  LS_STAT4_PERIOD  = "totalalbums",  "overall"  # → "20K"   label: Total Albums
-LS_STAT5_TYPE,  LS_STAT5_PERIOD  = "totalartists", "overall"  # → "8.7K"  label: Total Artists
-LS_STAT6_TYPE,  LS_STAT6_PERIOD  = "totaltracks",  "overall"  # → "28K"   label: Total Songs
+LS_STAT1_TYPE,  LS_STAT1_PERIOD  = "scrobbles",      "overall"  # → "253K"  label: Scrobbles
+LS_STAT2_TYPE,  LS_STAT2_PERIOD  = "hoursstreamed",   "overall"  # → hours   label: Hours Listened
+LS_STAT3_TYPE,  LS_STAT3_PERIOD  = "minutesstreamed", "overall"  # → mins    label: Minutes Listened
+LS_STAT4_TYPE,  LS_STAT4_PERIOD  = "totalalbums",     "overall"  # → "20K"  label: Total Albums
+LS_STAT5_TYPE,  LS_STAT5_PERIOD  = "totalartists",    "overall"  # → "8.7K" label: Total Artists
+LS_STAT6_TYPE,  LS_STAT6_PERIOD  = "totaltracks",     "overall"  # → "28K"  label: Total Songs
 
-# Mini profile stat — value + label gabung jadi satu string (tidak ada label field terpisah).
-# Contoh: type="totaltracks"             → "28,745 Total Songs"
-#         type="topartist", period="1month" → "Top Artist (30-Day): Holly Humberstone"
-LS_MINI_TYPE,   LS_MINI_PERIOD   = "totaltracks",  "overall"  # default: 28,745 Total Songs
+# Mini profile stat — value + label combined into a single self-contained string
+# (no separate label field; the Label toggle is off in the Discord editor).
+# Examples: type="totaltracks"                → "28,745 Total Songs"
+#           type="topartist", period="1month" → "Top Artist (30-Day): Holly Humberstone"
+LS_MINI_TYPE,   LS_MINI_PERIOD   = "totaltracks",     "overall"  # default: 28,745 Total Songs
+
 
 # ── Label lookup tables ──────────────────────────────────────────────────────────────
 LS_PERIOD_LABELS: dict[str, str] = {

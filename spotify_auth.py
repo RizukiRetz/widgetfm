@@ -20,7 +20,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv, set_key
 import requests
 
-REDIRECT_URI = "http://localhost:8888/callback"
+REDIRECT_URI = "http://127.0.0.1:8888/callback"
 SCOPES       = "user-read-currently-playing user-read-playback-state"
 PORT         = 8888
 
@@ -84,8 +84,8 @@ def main():
     print("\nOpening browser for authorization...")
     webbrowser.open(auth_url)
 
-    server = HTTPServer(("localhost", PORT), _CallbackHandler)
-    print(f"Waiting for Spotify to redirect to localhost:{PORT}...")
+    server = HTTPServer(("127.0.0.1", PORT), _CallbackHandler)
+    print(f"Waiting for Spotify to redirect to 127.0.0.1:{PORT}...")
     server.handle_request()   # handles exactly one request (the callback)
 
     code = _received_code["value"]
