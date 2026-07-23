@@ -17,6 +17,15 @@ LS_BOT_TOKEN      = os.getenv("BOT_TOKEN")
 TA_APPLICATION_ID = os.getenv("TOPARTISTS_APPLICATION_ID")
 TA_BOT_TOKEN      = os.getenv("TOPARTISTS_BOT_TOKEN")
 
+# ── Widget toggles ──────────────────────────────────────────────────────────────
+# True  = widget thread dijalankan saat startup
+# False = widget di-skip
+#
+# Catatan: ENABLE_TOP_ARTISTS = True membutuhkan STATSFM_USERNAME di .env.
+# Jika kosong, Top Artists di-skip otomatis dengan peringatan di console.
+ENABLE_LISTENING_STATS = True
+ENABLE_TOP_ARTISTS     = True
+
 # ── imgfixer: webhook URL for hosting processed album art ──────────────────────
 # Required when IMGFIXER_ENABLED = True.
 # Create a webhook in a private Discord channel:
@@ -83,9 +92,62 @@ NPCOUNT_SPLIT_LINES = False
 #   (old value was 32 with "Scrobbles"; +4 for the shorter word)
 NPCOUNT_TOTAL_MAX_LEN = 36
 
-# ── Intervals (seconds) ────────────────────────────────────────────────────────
+# ── Intervals (seconds) ──────────────────────────────────────────────────────────────
 LS_FAST_INTERVAL = 20   # how often to poll Last.FM for recent tracks
-LS_SLOW_INTERVAL = 60   # how often to refresh user info & stats.fm stream stats
+LS_SLOW_INTERVAL = 60   # how often to refresh user info & top stats
+
+# ── Listening Stats — Configurable Stat Slots ────────────────────────────────────
+# Setiap slot menampilkan data yang dikonfigurasi di sini. Label digenerate
+# otomatis oleh script dan dikirim ke Discord sebagai field lslabel1..lslabel6.
+# lsmini menggabungkan value + label menjadi satu string (label off di Discord editor).
+#
+# TYPE options:
+#   "scrobbles"       → Total scrobbles     (Last.FM, period diabaikan)
+#   "totalalbums"     → Total album unik    (Last.FM, period diabaikan)
+#   "totalartists"    → Total artis unik    (Last.FM, period diabaikan)
+#   "totaltracks"     → Total lagu unik     (Last.FM, period diabaikan)
+#   "topartist"       → Top Artist #1       (Last.FM, period dipakai)
+#   "toptrack"        → Top Song #1         (Last.FM, period dipakai)
+#   "topalbum"        → Top Album #1        (Last.FM, period dipakai)
+#   "hoursstreamed"   → Hours Listened      (stats.fm, butuh STATSFM_USERNAME)
+#   "minutesstreamed" → Minutes Listened    (stats.fm, butuh STATSFM_USERNAME)
+#
+# PERIOD options (hanya berlaku untuk topartist/toptrack/topalbum):
+#   "overall" | "7day" | "1month" | "3month" | "6month" | "12month"
+
+LS_STAT1_TYPE,  LS_STAT1_PERIOD  = "scrobbles",    "overall"  # → "253K"   label: Scrobbles
+LS_STAT2_TYPE,  LS_STAT2_PERIOD  = "topartist",    "1month"   # → artist  label: Top Artist (30-Day)
+LS_STAT3_TYPE,  LS_STAT3_PERIOD  = "toptrack",     "1month"   # → track   label: Top Song (30-Day)
+LS_STAT4_TYPE,  LS_STAT4_PERIOD  = "totalalbums",  "overall"  # → "20K"   label: Total Albums
+LS_STAT5_TYPE,  LS_STAT5_PERIOD  = "totalartists", "overall"  # → "8.7K"  label: Total Artists
+LS_STAT6_TYPE,  LS_STAT6_PERIOD  = "totaltracks",  "overall"  # → "28K"   label: Total Songs
+
+# Mini profile stat — value + label gabung jadi satu string (tidak ada label field terpisah).
+# Contoh: type="totaltracks"             → "28,745 Total Songs"
+#         type="topartist", period="1month" → "Top Artist (30-Day): Holly Humberstone"
+LS_MINI_TYPE,   LS_MINI_PERIOD   = "totaltracks",  "overall"  # default: 28,745 Total Songs
+
+# ── Label lookup tables ──────────────────────────────────────────────────────────────
+LS_PERIOD_LABELS: dict[str, str] = {
+    "overall": "All Time",
+    "7day":    "7-Day",
+    "1month":  "30-Day",
+    "3month":  "3-Month",
+    "6month":  "6-Month",
+    "12month": "12-Month",
+}
+
+LS_TYPE_LABELS: dict[str, str] = {
+    "scrobbles":       "Scrobbles",
+    "totalalbums":     "Total Albums",
+    "totalartists":    "Total Artists",
+    "totaltracks":     "Total Songs",
+    "topartist":       "Top Artist",
+    "toptrack":        "Top Song",
+    "topalbum":        "Top Album",
+    "hoursstreamed":   "Hours Listened",
+    "minutesstreamed": "Minutes Listened",
+}
 
 # ── Image pool ────────────────────────────────────────────────────────────────
 # Last.FM /+images shows up to 40 images per page.

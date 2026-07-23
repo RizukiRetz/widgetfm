@@ -190,7 +190,11 @@ def getUserInfo() -> tuple:
 
 
 def getStreamStats() -> tuple:
-    """Fetch total hours and minutes streamed from stats.fm (lifetime)."""
+    """Fetch total hours and minutes streamed from stats.fm (lifetime).
+    Returns (None, None) when STATSFM_USERNAME is not configured.
+    """
+    if not STATSFM_USERNAME:
+        return None, None
     r    = requests.get(
         f"https://api.stats.fm/api/v1/users/{STATSFM_USERNAME}/streams/stats?range=lifetime",
         headers=STATSFM_HEADERS, timeout=10,
@@ -199,11 +203,77 @@ def getStreamStats() -> tuple:
     if "items" not in data:
         print(f"[LS] Unexpected stats.fm response: {data}")
         raise KeyError(f"'items' key missing. Keys present: {list(data.keys())}")
-    duration_ms     = data["items"]["durationMs"]
-    hours_streamed  = duration_ms // 3_600_000
+    duration_ms      = data["items"]["durationMs"]
+    hours_streamed   = duration_ms // 3_600_000
     minutes_streamed = duration_ms // 60_000
     if DEBUG: print(f"[LS] stats.fm: {hours_streamed:,} hours | {minutes_streamed:,} minutes")
     return hours_streamed, minutes_streamed
+
+def getTopStat(type_: str, period: str, user_info: dict | None = None) -> tuple[str, str]:
+    """Return (value_str, label_str) for a configurable Listening Stats slot.
+
+    Handles all configurable types:
+      Static (no API call — reads from user_info dict):
+        scrobbles, totalalbums, totalartists, totaltracks
+      Last.FM top* (one API call per unique type+period):
+        topartist, toptrack, topalbum
+      stats.fm (optional — requires STATSFM_USERNAME):
+        hoursstreamed, minutesstreamed
+
+    Returns ('\u2014', label) gracefully on error or missing config.
+    """
+    period_label = LS_PERIOD_LABELS.get(period, period)
+    base_label   = LS_TYPE_LABELS.get(type_, type_)
+
+    # ── Static types: read from already-fetched getUserInfo() data ─────────────
+    if type_ in ("scrobbles", "totalalbums", "totalartists", "totaltracks"):
+        count = (user_info or {}).get(type_, 0)
+        return f"{count:,}", base_label
+
+    # ── stats.fm types (optional) ───────────────────────────────────────────
+    if type_ in ("hoursstreamed", "minutesstreamed"):
+        if not STATSFM_USERNAME:
+            return "—", base_label
+        h, m = getStreamStats()
+        val = h if type_ == "hoursstreamed" else m
+        return (f"{val:,}" if val is not None else "—"), base_label
+
+    # ── Last.FM top* types ───────────────────────────────────────────────
+    method_map = {
+        "topartist": "user.gettopartists",
+        "toptrack":  "user.gettoptracks",
+        "topalbum":  "user.gettopalbums",
+    }
+    method = method_map.get(type_)
+    if not method:
+        return "—", base_label
+
+    label = f"{base_label} ({period_label})"
+    try:
+        r    = requests.get(
+            "https://ws.audioscrobbler.com/2.0/",
+            params={
+                "method":  method,
+                "user":    LAST_FM_USERNAME,
+                "api_key": API_KEY,
+                "format":  "json",
+                "limit":   1,
+                "period":  period,
+            },
+            timeout=10,
+        )
+        data = r.json()
+        if type_ == "topartist":
+            name = data["topartists"]["artist"][0]["name"]
+        elif type_ == "toptrack":
+            name = data["toptracks"]["track"][0]["name"]
+        else:  # topalbum
+            name = data["topalbums"]["album"][0]["name"]
+        if DEBUG: print(f"[LS] getTopStat {type_}/{period}: {name}")
+        return name, label
+    except Exception as exc:
+        print(f"[LS] getTopStat error ({type_}/{period}): {exc}")
+        return "—", label
 
 
 # Valid Last.FM image hash: 32 hex chars (MD5).
@@ -635,13 +705,54 @@ def run_listening_stats() -> None:
             # --- Slow data: refresh every LS_SLOW_INTERVAL seconds ---
             if cached_slow is None or (now - last_slow_fetch) >= LS_SLOW_INTERVAL:
                 scrobbles, total_artists, total_albums, total_tracks = getUserInfo()
-                hours_streamed, minutes_streamed = getStreamStats()
-                cached_slow     = (scrobbles, total_artists, total_albums, total_tracks,
-                                   hours_streamed, minutes_streamed)
+                ui = {
+                    "scrobbles":    scrobbles,
+                    "totalalbums":  total_albums,
+                    "totalartists": total_artists,
+                    "totaltracks":  total_tracks,
+                }
+                # Fetch all slots — deduplicate API calls for identical type+period.
+                _slot_cfgs = [
+                    (LS_STAT1_TYPE, LS_STAT1_PERIOD),
+                    (LS_STAT2_TYPE, LS_STAT2_PERIOD),
+                    (LS_STAT3_TYPE, LS_STAT3_PERIOD),
+                    (LS_STAT4_TYPE, LS_STAT4_PERIOD),
+                    (LS_STAT5_TYPE, LS_STAT5_PERIOD),
+                    (LS_STAT6_TYPE, LS_STAT6_PERIOD),
+                    (LS_MINI_TYPE,  LS_MINI_PERIOD),
+                ]
+                _sc: dict = {}
+                for _t, _p in _slot_cfgs:
+                    if (_t, _p) not in _sc:
+                        _sc[(_t, _p)] = getTopStat(_t, _p, ui)
+
+                stat1_val, stat1_label = _sc[(LS_STAT1_TYPE, LS_STAT1_PERIOD)]
+                stat2_val, stat2_label = _sc[(LS_STAT2_TYPE, LS_STAT2_PERIOD)]
+                stat3_val, stat3_label = _sc[(LS_STAT3_TYPE, LS_STAT3_PERIOD)]
+                stat4_val, stat4_label = _sc[(LS_STAT4_TYPE, LS_STAT4_PERIOD)]
+                stat5_val, stat5_label = _sc[(LS_STAT5_TYPE, LS_STAT5_PERIOD)]
+                stat6_val, stat6_label = _sc[(LS_STAT6_TYPE, LS_STAT6_PERIOD)]
+                mini_val,  mini_label  = _sc[(LS_MINI_TYPE,  LS_MINI_PERIOD)]
+
+                # lsmini: self-contained string (value + label combined, no separate label field)
+                if LS_MINI_TYPE in ("topartist", "toptrack", "topalbum"):
+                    lsmini = f"{mini_label}: {mini_val}"  # e.g. "Top Artist (30-Day): Holly Humberstone"
+                else:
+                    lsmini = f"{mini_val} {mini_label}"   # e.g. "28,745 Total Songs"
+
+                cached_slow = (
+                    stat1_val, stat1_label, stat2_val, stat2_label,
+                    stat3_val, stat3_label, stat4_val, stat4_label,
+                    stat5_val, stat5_label, stat6_val, stat6_label,
+                    lsmini,
+                )
                 last_slow_fetch = now
                 if DEBUG: print("[LS] Slow data refreshed")
             else:
-                scrobbles, total_artists, total_albums, total_tracks, hours_streamed, minutes_streamed = cached_slow
+                (stat1_val, stat1_label, stat2_val, stat2_label,
+                 stat3_val, stat3_label, stat4_val, stat4_label,
+                 stat5_val, stat5_label, stat6_val, stat6_label,
+                 lsmini) = cached_slow
 
             # --- Fast data: every LS_FAST_INTERVAL seconds ---
             now_playing, banner_url, np_track, np_artist, mbid, np_album, np_track_mbid = getRecentScrobble()
@@ -785,9 +896,9 @@ def run_listening_stats() -> None:
             # --- Push to Discord only when something has changed ---
             current_payload = (
                 now_playing, fixed_banner_url, np_track, np_artist, mbid, banner_mini_url,
-                scrobbles, total_artists, total_albums, total_tracks,
-                hours_streamed, minutes_streamed,
-                cached_npcount,
+                stat1_val, stat2_val, stat3_val, stat4_val, stat5_val, stat6_val,
+                stat1_label, stat2_label, stat3_label, stat4_label, stat5_label, stat6_label,
+                lsmini, cached_npcount,
             )
 
             if current_payload != prev_payload:
@@ -802,17 +913,26 @@ def run_listening_stats() -> None:
                 if fixed_banner_url:
                     dynamic.append({"type": 3, "name": "bannerwidgettop", "value": {"url": fixed_banner_url}})
                 dynamic += [
-                    {"type": 1, "name": "nowplaying",     "value": now_playing},
-                    {"type": 1, "name": "nptrack",         "value": np_track},
-                    {"type": 1, "name": "npartist",        "value": np_artist},
-                    {"type": 1, "name": "npcount",         "value": cached_npcount},
-                    {"type": 1, "name": "scrobbles",       "value": f"{scrobbles:,}"},
-                    {"type": 1, "name": "hoursstreamed",   "value": f"{hours_streamed:,}"},
-                    {"type": 1, "name": "minutesstreamed", "value": f"{minutes_streamed:,}"},
-                    {"type": 1, "name": "totalalbums",     "value": f"{total_albums:,}"},
-                    {"type": 1, "name": "totalartists",    "value": f"{total_artists:,}"},
-                    {"type": 1, "name": "totaltracks",     "value": f"{total_tracks:,}"},
-                    {"type": 1, "name": "totaltrackmini",  "value": f"{total_tracks:,} Total Songs "},
+                    {"type": 1, "name": "nowplaying",  "value": now_playing},
+                    {"type": 1, "name": "nptrack",     "value": np_track},
+                    {"type": 1, "name": "npartist",    "value": np_artist},
+                    {"type": 1, "name": "npcount",     "value": cached_npcount},
+                    # Stat values (configurable via config.py LS_STAT*_TYPE / LS_STAT*_PERIOD)
+                    {"type": 1, "name": "lsstat1",     "value": stat1_val},
+                    {"type": 1, "name": "lsstat2",     "value": stat2_val},
+                    {"type": 1, "name": "lsstat3",     "value": stat3_val},
+                    {"type": 1, "name": "lsstat4",     "value": stat4_val},
+                    {"type": 1, "name": "lsstat5",     "value": stat5_val},
+                    {"type": 1, "name": "lsstat6",     "value": stat6_val},
+                    # Stat labels (auto-generated from type + period)
+                    {"type": 1, "name": "lslabel1",    "value": stat1_label},
+                    {"type": 1, "name": "lslabel2",    "value": stat2_label},
+                    {"type": 1, "name": "lslabel3",    "value": stat3_label},
+                    {"type": 1, "name": "lslabel4",    "value": stat4_label},
+                    {"type": 1, "name": "lslabel5",    "value": stat5_label},
+                    {"type": 1, "name": "lslabel6",    "value": stat6_label},
+                    # Mini profile stat (combined value + label string)
+                    {"type": 1, "name": "lsmini",      "value": lsmini},
                 ]
                 if banner_mini_url:
                     dynamic.append({"type": 3, "name": "bannermini", "value": {"url": banner_mini_url}})
@@ -942,20 +1062,44 @@ if __name__ == "__main__":
         if TOPARTISTS_ROTATE else
         f"rotate=OFF | range={ROTATION_LABELS.get(TOPARTISTS_RANGE, TOPARTISTS_RANGE)} | refresh={STATIC_INTERVAL}s"
     )
+
+    # ── Widget toggle validation ───────────────────────────────────────────────
+    effective_ls = ENABLE_LISTENING_STATS
+    effective_ta = ENABLE_TOP_ARTISTS
+
+    if effective_ta and not STATSFM_USERNAME:
+        print("[TA] WARNING: STATSFM_USERNAME not set → Top Artists widget disabled")
+        effective_ta = False
+
+    if not effective_ls and not effective_ta:
+        print("[ERROR] Both widgets are disabled. Set at least one to True in config.py.")
+        sys.exit(1)
+
+    # ── Startup banner ───────────────────────────────────────────────────────────
+    ls_status = (
+        f"✓ fast={LS_FAST_INTERVAL}s / slow={LS_SLOW_INTERVAL}s"
+        if effective_ls else "✗ disabled"
+    )
+    ta_status = (
+        f"✓ {ta_mode}"     if effective_ta else
+        "✗ disabled"      if not ENABLE_TOP_ARTISTS else
+        "✗ STATSFM_USERNAME not set"
+    )
     print("=" * 55)
-    print("   Discord Widget Stats — Starting")
-    print(f"   Listening Stats : fast={LS_FAST_INTERVAL}s / slow={LS_SLOW_INTERVAL}s")
-    print(f"   Top Artists     : {ta_mode}")
+    print("   WidgetFM — Starting")
+    print(f"   Listening Stats : {ls_status}")
+    print(f"   Top Artists     : {ta_status}")
     print("=" * 55)
 
     # Pre-load the image cache so both threads can serve from it immediately
     _g_image_cache.update(load_image_cache())
     print(f"[Cache] Global cache ready: {len(_g_image_cache)} artist(s) cached")
 
-    threads = [
-        threading.Thread(target=run_listening_stats, name="ListeningStats", daemon=True),
-        threading.Thread(target=run_top_artists,     name="TopArtists",     daemon=True),
-    ]
+    threads = []
+    if effective_ls:
+        threads.append(threading.Thread(target=run_listening_stats, name="ListeningStats", daemon=True))
+    if effective_ta:
+        threads.append(threading.Thread(target=run_top_artists,     name="TopArtists",     daemon=True))
 
     for t in threads:
         t.start()
