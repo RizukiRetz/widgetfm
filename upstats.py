@@ -45,7 +45,7 @@ if USER_ID:
     try:
         from lanyardfetch import get_lanyard_album_art as _get_lanyard_art
         _lanyard_available = True
-        print("[Lanyard] Album art source enabled (priority 1)")
+        print("[Lanyard] Presence enabled — song, artist, album, and art (priority 1)")
     except ImportError:
         print("[Lanyard] lanyardfetch.py not found — Lanyard disabled")
 
@@ -691,12 +691,14 @@ def run_listening_stats() -> None:
     # Lanyard retries every poll for 'Now Playing' (user IS listening),
     # but only once per track for 'Last Played' (track name won't match).
     # Spotify tries once per track regardless of status.
-    prev_art_key:       tuple    = ()    # (np_track, np_artist)
-    lanyard_fetched:    bool     = False # True = tried Lanyard for this track
-    cached_lanyard_url: str | None = None
-    cached_lanyard_album: str | None = None  # album name from Lanyard (Spotify Rich Presence)
-    spotify_fetched:    bool     = False # True = tried Spotify for this track
-    cached_spotify_url: str | None = None
+    prev_art_key:         tuple    = ()    # (np_track, np_artist)
+    lanyard_fetched:      bool     = False # True = tried Lanyard for this track
+    cached_lanyard_url:   str | None = None
+    cached_lanyard_album: str | None = None  # album from Lanyard (Spotify Rich Presence)
+    cached_lanyard_song:  str | None = None  # song name from Lanyard (primary display)
+    cached_lanyard_artist:str | None = None  # artist from Lanyard (collabs joined with ',')
+    spotify_fetched:      bool     = False # True = tried Spotify for this track
+    cached_spotify_url:   str | None = None
 
     print("[LS] Thread started")
 
@@ -766,25 +768,30 @@ def run_listening_stats() -> None:
 
             art_key = (np_track, np_artist)
             if art_key != prev_art_key:
-                cached_lanyard_url   = None
-                cached_lanyard_album = None
-                lanyard_fetched      = False
-                cached_spotify_url   = None
-                spotify_fetched      = False
-                prev_art_key         = art_key
+                cached_lanyard_url    = None
+                cached_lanyard_album  = None
+                cached_lanyard_song   = None
+                cached_lanyard_artist = None
+                lanyard_fetched       = False
+                cached_spotify_url    = None
+                spotify_fetched       = False
+                prev_art_key          = art_key
                 if DEBUG: print(f"[LS] Art cache cleared: {np_track}")
 
-            # Priority 1 — Lanyard: Discord presence, 640×640, no auth, free.
-            # Retry every poll for 'Now Playing' (user is actively listening).
-            # Try once for 'Last Played' (track won't match Spotify presence).
-            if cached_lanyard_url is None and _lanyard_available:
+            # Priority 1 — Lanyard: Discord presence, no auth, free.
+            # Primary source for song, artist, album, and 640×640 album art.
+            # Retry every poll for 'Now Playing'; try once for 'Last Played'.
+            if cached_lanyard_song is None and _lanyard_available:
                 if not lanyard_fetched or now_playing == "Now Playing":
-                    _art, _lanyard_album = _get_lanyard_art(USER_ID, np_track, np_artist)
+                    _art, _lanyard_album, _lanyard_song, _lanyard_artist = _get_lanyard_art(USER_ID)
                     lanyard_fetched = True
-                    if _art:
-                        cached_lanyard_url   = _art
-                        cached_lanyard_album = _lanyard_album
-                        print("[LS] bannerwidgettop: Lanyard")
+                    if _lanyard_song:  # user is actively playing Spotify via Discord
+                        cached_lanyard_url    = _art
+                        cached_lanyard_album  = _lanyard_album
+                        cached_lanyard_song   = _lanyard_song
+                        cached_lanyard_artist = _lanyard_artist
+                        if _art:
+                            print("[LS] bannerwidgettop: Lanyard")
             banner_url = cached_lanyard_url
 
             # Priority 2 — Spotify: try once per track (needs API call / auth).
@@ -869,30 +876,30 @@ def run_listening_stats() -> None:
             # for all subsequent polls of the same track.
             npcount_key = (np_track, np_artist)
             if npcount_key != prev_npcount_key:
-                count, album_title  = getTrackInfo(np_artist, np_track, track_mbid=np_track_mbid)
-                scrobble_album      = _EXPLICIT_RE.sub("", np_album).strip() if np_album else ""
-                if DEBUG: print(f"[LS] npcount raw → count={count} | getInfo album='{album_title}' | scrobble album='{scrobble_album}'")
+                count, getinfo_album = getTrackInfo(np_artist, np_track, track_mbid=np_track_mbid)
+                scrobble_album       = _EXPLICIT_RE.sub("", np_album).strip() if np_album else ""
+                if DEBUG: print(
+                    f"[LS] npcount raw → count={count}"
+                    f" | lanyard='{cached_lanyard_album}'"
+                    f" | scrobble='{scrobble_album}'"
+                    f" | getInfo='{getinfo_album}'"
+                )
 
-                # Prefer scrobble metadata album in two cases:
-                # 1. track.getInfo returned no album (not linked in Last.FM's DB)
-                # 2. track.getInfo returned album == track name (registered as a
-                #    single on Last.FM), but scrobble has the real album title
-                if not album_title and scrobble_album:
-                    album_title = scrobble_album
-                elif (album_title
-                      and album_title.lower() == np_track.lower()
-                      and scrobble_album
-                      and scrobble_album.lower() != np_track.lower()):
-                    album_title = scrobble_album
-
-                # 3rd fallback: Lanyard carries spotify.album from Discord Rich Presence.
-                # Available immediately — even for newly released tracks Last.FM hasn't indexed.
-                if not album_title and cached_lanyard_album:
+                # Album priority: Lanyard (Spotify) → Last.FM scrobble → track.getInfo
+                # Lanyard.album is always accurate — directly from Spotify,
+                # never mislabeled as a single or given the wrong track title.
+                if cached_lanyard_album:
                     album_title = cached_lanyard_album
-                    if DEBUG: print(f"[LS] npcount: album from Lanyard → '{album_title}'")
+                elif scrobble_album:
+                    album_title = scrobble_album
+                else:
+                    album_title = getinfo_album
 
-                cached_npcount      = format_npcount(count, album_title, np_track)
-                prev_npcount_key    = npcount_key
+                # Pass the Lanyard song name (if available) to format_npcount
+                # so the 'album == track' check uses the same title we display.
+                display_track = cached_lanyard_song or np_track
+                cached_npcount   = format_npcount(count, album_title, display_track)
+                prev_npcount_key = npcount_key
                 print(f"[LS] npcount: {cached_npcount}")
 
 
@@ -905,6 +912,7 @@ def run_listening_stats() -> None:
             # --- Push to Discord only when something has changed ---
             current_payload = (
                 now_playing, fixed_banner_url, np_track, np_artist, mbid, banner_mini_url,
+                cached_lanyard_song, cached_lanyard_artist,
                 stat1_val, stat2_val, stat3_val, stat4_val, stat5_val, stat6_val,
                 stat1_label, stat2_label, stat3_label, stat4_label, stat5_label, stat6_label,
                 lsmini, cached_npcount,
@@ -923,8 +931,10 @@ def run_listening_stats() -> None:
                     dynamic.append({"type": 3, "name": "bannerwidgettop", "value": {"url": fixed_banner_url}})
                 dynamic += [
                     {"type": 1, "name": "nowplaying",  "value": now_playing},
-                    {"type": 1, "name": "nptrack",     "value": np_track},
-                    {"type": 1, "name": "npartist",    "value": np_artist},
+                    # Prefer Lanyard values (Spotify source) for song and artist;
+                    # fall back to Last.FM when Lanyard is not available.
+                    {"type": 1, "name": "nptrack",     "value": cached_lanyard_song   or np_track},
+                    {"type": 1, "name": "npartist",    "value": cached_lanyard_artist or np_artist},
                     {"type": 1, "name": "npcount",     "value": cached_npcount},
                     # Stat values (configurable via config.py LS_STAT*_TYPE / LS_STAT*_PERIOD)
                     {"type": 1, "name": "lsstat1",     "value": stat1_val},
