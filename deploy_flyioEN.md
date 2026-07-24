@@ -95,7 +95,10 @@ If you have already deployed and need to add new secrets (e.g. Spotify keys adde
 
 ```powershell
 # Set one or more secrets — Fly.io will automatically redeploy
-flyctl secrets set SPOTIFY_CLIENT_ID="..." SPOTIFY_CLIENT_SECRET="..." SPOTIFY_REFRESH_TOKEN="..."
+flyctl secrets set `
+  SPOTIFY_CLIENT_ID="..." `
+  SPOTIFY_CLIENT_SECRET="..." `
+  SPOTIFY_REFRESH_TOKEN="..."
 ```
 
 To set multiple secrets at once without triggering a redeploy per secret, chain them in a single command as shown above — Fly.io only redeploys once.

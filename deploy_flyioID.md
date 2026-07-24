@@ -94,7 +94,10 @@ Jika kamu sudah deploy sebelumnya dan ingin menambahkan secrets baru (misal Spot
 
 ```powershell
 # Set satu atau beberapa secrets — Fly.io akan otomatis redeploy
-flyctl secrets set SPOTIFY_CLIENT_ID="..." SPOTIFY_CLIENT_SECRET="..." SPOTIFY_REFRESH_TOKEN="..."
+flyctl secrets set `
+  SPOTIFY_CLIENT_ID="..." `
+  SPOTIFY_CLIENT_SECRET="..." `
+  SPOTIFY_REFRESH_TOKEN="..."
 ```
 
 Untuk menambahkan beberapa secrets sekaligus tanpa memicu redeploy berulang, gabungkan dalam satu command seperti di atas — Fly.io hanya redeploy sekali.
