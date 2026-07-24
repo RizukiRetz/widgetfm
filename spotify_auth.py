@@ -21,7 +21,11 @@ from dotenv import load_dotenv, set_key
 import requests
 
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
-SCOPES       = "user-read-currently-playing user-read-playback-state"
+SCOPES       = (
+    "user-read-currently-playing "
+    "user-read-playback-state "
+    "user-read-recently-played"   # needed for Last Played → recently-played API
+)
 PORT         = 8888
 
 load_dotenv()
@@ -124,7 +128,7 @@ def main():
     set_key(env_path, "SPOTIFY_REFRESH_TOKEN", refresh_token)
 
     print("\n✓  SPOTIFY_REFRESH_TOKEN saved to .env")
-    print("✓  The bot will now use the Spotify queue API for 'Now Playing' tracks.")
+    print("✓  Enabled: Now Playing (queue API), Last Played (recently-played API), Search.")
     print("\nRestart the bot (upstats.py) to apply.\n")
 
 

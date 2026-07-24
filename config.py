@@ -47,7 +47,7 @@ SPOTIFY_REFRESH_TOKEN = os.getenv("SPOTIFY_REFRESH_TOKEN", "")
 #         thin top strip + rounds the top-right corner) then host it on Discord
 #         CDN via the webhook URL below. Requires Pillow and DISCORD_IMAGE_WEBHOOK_URL.
 # False = use the raw Last.FM CDN URL as-is (default, no extra dependencies).
-IMGFIXER_ENABLED = True
+IMGFIXER_ENABLED = False
 
 # How long (seconds) before a cached Discord CDN URL is considered stale and
 # the image is re-uploaded. Discord signed CDN URLs expire at ~24 h;
@@ -115,12 +115,12 @@ LS_SLOW_INTERVAL = 60   # how often to refresh user info & top stats
 # PERIOD options (only applies to topartist / toptrack / topalbum):
 #   "overall" | "7day" | "1month" | "3month" | "6month" | "12month"
 
-LS_STAT1_TYPE,  LS_STAT1_PERIOD  = "scrobbles",      "overall"  # → "253K"  label: Scrobbles
-LS_STAT2_TYPE,  LS_STAT2_PERIOD  = "hoursstreamed",   "overall"  # → hours   label: Hours Listened
-LS_STAT3_TYPE,  LS_STAT3_PERIOD  = "minutesstreamed", "overall"  # → mins    label: Minutes Listened
-LS_STAT4_TYPE,  LS_STAT4_PERIOD  = "totalalbums",     "overall"  # → "20K"  label: Total Albums
-LS_STAT5_TYPE,  LS_STAT5_PERIOD  = "totalartists",    "overall"  # → "8.7K" label: Total Artists
-LS_STAT6_TYPE,  LS_STAT6_PERIOD  = "totaltracks",     "overall"  # → "28K"  label: Total Songs
+LS_STAT1_TYPE,  LS_STAT1_PERIOD  = "totaltracks",       "overall"  # →  "28K"  label: Total Songs
+LS_STAT2_TYPE,  LS_STAT2_PERIOD  = "totalalbums",   "overall" # →  "20K"  label: Total Albums
+LS_STAT3_TYPE,  LS_STAT3_PERIOD  = "totalartists",   "overall"  # →  "8.7K" label: Total Artists
+LS_STAT4_TYPE,  LS_STAT4_PERIOD  = "scrobbles",    "overall"  # → "253K"  label: Scrobbles 
+LS_STAT5_TYPE,  LS_STAT5_PERIOD  = "hoursstreamed",    "overall"  # → hours   label: Hours Listened  
+LS_STAT6_TYPE,  LS_STAT6_PERIOD  = "minutesstreamed",     "overall" # → mins    label: Minutes Listened
 
 # Mini profile stat — value + label combined into a single self-contained string
 # (no separate label field; the Label toggle is off in the Discord editor).

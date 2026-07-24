@@ -23,13 +23,14 @@ _spotify_user_available = False   # User OAuth currently-playing (Strategy 1)
 if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
     try:
         from spotifyfetch import (
-            get_queue_album_art  as _get_spotify_queue_art,
+            get_queue_album_art   as _get_spotify_queue_art,
             get_spotify_album_art as _get_spotify_art,
+            get_recently_played   as _get_spotify_recent,
         )
         _spotify_available = True
         if SPOTIFY_REFRESH_TOKEN:
             _spotify_user_available = True
-            print("[Spotify] currently-playing + Search enabled")
+            print("[Spotify] currently-playing + recently-played + Search enabled")
         else:
             print("[Spotify] Search fallback enabled (run spotify_auth.py for exact match)")
     except ImportError:
@@ -432,6 +433,21 @@ def getArtistImagePool(mbid: str, artist_name: str = "") -> list:
     return pool
 
 
+def _warm_url(url: str) -> None:
+    """Fire-and-forget: stream-open a URL to warm proxy/CDN caches.
+
+    wsrv.nl processes and caches images on first GET request.  By triggering
+    the request in a background daemon thread right after `banner_mini_url` is
+    set, Discord's widget renderer gets a fast (cached) response instead of a
+    slow cold-cache delay.  No body is downloaded — just the headers.
+    """
+    try:
+        with requests.get(url, stream=True, timeout=8) as _:
+            pass  # headers received; wsrv.nl has processed + cached the image
+    except Exception:
+        pass
+
+
 def getRecentScrobble() -> tuple:
     """Fetch the most recent (or currently playing) track from Last.FM."""
     r    = requests.get(
@@ -611,11 +627,7 @@ def format_npcount(count: int, album_title, track_name: str) -> str:
       count=1  → '1 Scrobble'
       no album / album == track name (single) → just the count string
     """
-    if count == 0:
-        return "1st Play"
-
-    play_word = "Play" if count == 1 else "Plays"
-    count_str = f"{_format_count(count)} {play_word}"
+    count_str = "1st Play" if count == 0 else f"{_format_count(count)} {'Play' if count == 1 else 'Plays'}"
 
     # No album to show (absent or it's a single — album title == track title).
     # 1. Strip release-type suffixes: "I'm Your Man - Single" → "I'm Your Man"
@@ -697,7 +709,8 @@ def run_listening_stats() -> None:
     cached_lanyard_album: str | None = None  # album from Lanyard (Spotify Rich Presence)
     cached_lanyard_song:  str | None = None  # song name from Lanyard (primary display)
     cached_lanyard_artist:str | None = None  # artist from Lanyard (collabs joined with ',')
-    spotify_fetched:      bool     = False # True = tried Spotify for this track
+    _spotify_lp_fetched:  bool     = False # True = tried Spotify recently-played for this track
+    spotify_fetched:      bool     = False # True = tried Spotify search/queue for this track
     cached_spotify_url:   str | None = None
 
     print("[LS] Thread started")
@@ -773,10 +786,30 @@ def run_listening_stats() -> None:
                 cached_lanyard_song   = None
                 cached_lanyard_artist = None
                 lanyard_fetched       = False
+                _spotify_lp_fetched   = False
                 cached_spotify_url    = None
                 spotify_fetched       = False
                 prev_art_key          = art_key
                 if DEBUG: print(f"[LS] Art cache cleared: {np_track}")
+
+            # Priority 0 (Last Played only) — Spotify recently-played
+            # When Discord/Lanyard has no active presence (user stopped playing),
+            # use Spotify's own recently-played API for accurate song, artist, album, art.
+            # Tried once per track (one-shot; Lanyard also won't have data for Last Played).
+            if (now_playing == "Last Played"
+                    and cached_lanyard_song is None
+                    and _spotify_user_available
+                    and not _spotify_lp_fetched):
+                _sp_song, _sp_artist, _sp_album, _sp_art = _get_spotify_recent(
+                    SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN
+                )
+                _spotify_lp_fetched = True
+                if _sp_song:
+                    cached_lanyard_url    = _sp_art
+                    cached_lanyard_album  = _sp_album
+                    cached_lanyard_song   = _sp_song
+                    cached_lanyard_artist = _sp_artist
+                    print(f"[LS] Last Played: Spotify recently-played → {_sp_song} — {_sp_artist}")
 
             # Priority 1 — Lanyard: Discord presence, no auth, free.
             # Primary source for song, artist, album, and 640×640 album art.
@@ -842,9 +875,13 @@ def run_listening_stats() -> None:
                         DISCORD_IMAGE_WEBHOOK_URL,
                         reupload_interval=IMGFIXER_REUPLOAD_INTERVAL,
                     )
-                else:
+                elif any(h in banner_url for h in ("lastfm", "last.fm")):
+                    # Last.FM CDN (Fastly) is sometimes unreachable from Discord's
+                    # servers — proxy through wsrv.nl to ensure reliable delivery.
                     clean_url        = banner_url.replace("https://", "")
                     fixed_banner_url = f"https://wsrv.nl/?url={clean_url}&output=jpg&q=85"
+                # else: Spotify CDN (i.scdn.co), Discord CDN, etc.
+                # — serve directly, no proxy needed.
 
             # --- Artist image (bannermini) ---
             if ARTIST_IMAGE_ENABLED:
@@ -855,10 +892,14 @@ def run_listening_stats() -> None:
                     prev_mbid       = mbid
                     prev_npartist   = np_artist
                     banner_mini_url = random.choice(cached_pool) if cached_pool else AUDIODB_FALLBACK_URL
-                    if DEBUG:
-                        print(f"[LS] New artist: {np_artist} → {banner_mini_url}")
-                    else:
-                        print(f"[LS] New artist: {np_artist}")
+                    print(f"[LS] New artist: {np_artist}")
+                    print(f"[LS] bannermini: {banner_mini_url}")
+                    # Pre-warm wsrv.nl cache in background: ensures Discord
+                    # gets a fast cached response when the widget renders.
+                    if banner_mini_url and "wsrv.nl" in banner_mini_url:
+                        threading.Thread(
+                            target=_warm_url, args=(banner_mini_url,), daemon=True
+                        ).start()
                 elif np_track != prev_nptrack:
                     if cached_pool:
                         # Exclude the currently shown image so it always refreshes on track change.
@@ -866,7 +907,11 @@ def run_listening_stats() -> None:
                         # to the one already displayed — making it look like the image is stuck.
                         alt_pool = [u for u in cached_pool if u != banner_mini_url]
                         banner_mini_url = random.choice(alt_pool if alt_pool else cached_pool)
-                        if DEBUG: print(f"[LS] New track, updating bannermini (pool={len(cached_pool)}): {banner_mini_url}")
+                    print(f"[LS] bannermini: {banner_mini_url}")
+                    if banner_mini_url and "wsrv.nl" in banner_mini_url:
+                        threading.Thread(
+                            target=_warm_url, args=(banner_mini_url,), daemon=True
+                        ).start()
                 prev_nptrack = np_track
             else:
                 banner_mini_url = AUDIODB_FALLBACK_URL

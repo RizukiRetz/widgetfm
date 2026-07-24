@@ -250,3 +250,79 @@ def get_spotify_album_art(track: str, artist: str,
 
     images = items[0].get("album", {}).get("images", [])
     return _best_image(images)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Strategy 3 — Recently Played API (user OAuth, Last Played only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_recently_played(
+    client_id: str, client_secret: str, refresh_token: str
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Fetch the most recently played track from /v1/me/player/recently-played.
+
+    Requires user OAuth (refresh_token).  Used as the primary data source for
+    'Last Played' status — provides song, artist, album, and album art directly
+    from Spotify (always correct, no Last.FM indexing delay).
+
+    Response path:
+      items[0].track.name            → song
+      items[0].track.artists[].name  → artists (joined with ', ')
+      items[0].track.album.name      → album
+      items[0].track.album.images[]  → art (largest picked by _best_image)
+
+    Returns (song, artist, album, art_url).
+    All values are None on any error or if the history is empty.
+    """
+    if not refresh_token or not client_id or not client_secret:
+        return None, None, None, None
+
+    token = _get_user_token(refresh_token, client_id, client_secret)
+    if not token:
+        return None, None, None, None
+
+    def _fetch(tok: str):
+        return requests.get(
+            "https://api.spotify.com/v1/me/player/recently-played",
+            headers={"Authorization": f"Bearer {tok}"},
+            params={"limit": 1},
+            timeout=8,
+        )
+
+    try:
+        r = _fetch(token)
+
+        if r.status_code == 401:
+            _user_cache["access_token"] = None
+            _user_cache["expires_at"]   = 0.0
+            token = _get_user_token(refresh_token, client_id, client_secret)
+            if not token:
+                return None, None, None, None
+            r = _fetch(token)
+
+        if r.status_code != 200:
+            print(f"[Spotify] recently-played HTTP {r.status_code}")
+            return None, None, None, None
+
+        data  = r.json()
+        items = data.get("items", [])
+        if not items:
+            return None, None, None, None
+
+        track = items[0].get("track") or {}
+        if not track:
+            return None, None, None, None
+
+        song   = track.get("name", "").strip() or None
+        artist = ", ".join(
+            a["name"] for a in track.get("artists", []) if a.get("name")
+        ) or None
+        album  = track.get("album", {}).get("name", "").strip() or None
+        art    = _best_image(track.get("album", {}).get("images", []))
+
+        return song, artist, album, art
+
+    except Exception as exc:
+        print(f"[Spotify] recently-played error: {exc}")
+        return None, None, None, None
+
