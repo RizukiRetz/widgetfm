@@ -87,6 +87,9 @@ See `.env.example` for a description of each variable.
 
 > ⚠️ **Spotify auth must be done locally.** `spotify_auth.py` opens a browser and runs a local HTTP server — it cannot run on Fly.io. Obtain your refresh token locally first (`python spotify_auth.py`), then add it as a secret above.
 
+> ℹ️ **Values in `.env` use quotes as delimiters** (`KEY='value'` or `KEY="value"`). `python-dotenv` strips them automatically when running locally. When setting Fly.io secrets, paste **only the value itself — without the surrounding quotes**.
+> Example: if `.env` has `SPOTIFY_REFRESH_TOKEN='AQDxxxxx'`, the Fly.io command should be `flyctl secrets set SPOTIFY_REFRESH_TOKEN="AQDxxxxx"` (no single quotes).
+
 ---
 
 ## Step 4b — Adding Secrets to an Already-Deployed App

@@ -86,6 +86,9 @@ flyctl secrets set DISCORD_IMAGE_WEBHOOK_URL="https://discord.com/api/webhooks/.
 
 > ⚠️ **Spotify auth harus dilakukan di lokal.** `spotify_auth.py` membuka browser dan menjalankan HTTP server lokal — tidak bisa berjalan di Fly.io. Dapatkan refresh token di lokal dulu (`python spotify_auth.py`), lalu tambahkan sebagai secret di atas.
 
+> ℹ️ **Value di file `.env` menggunakan tanda kutip sebagai delimiter** (`KEY='value'` atau `KEY="value"`). Library `python-dotenv` otomatis menghapus tanda kutip tersebut saat berjalan di lokal. Saat set Fly.io secrets, paste **hanya nilai tokennya saja — tanpa tanda kutip pembungkusnya**.
+> Contoh: jika `.env` berisi `SPOTIFY_REFRESH_TOKEN='AQDxxxxx'`, maka command Fly.io yang benar adalah `flyctl secrets set SPOTIFY_REFRESH_TOKEN="AQDxxxxx"` (tanpa single quote).
+
 ---
 
 ## Langkah 4b — Menambahkan Secrets ke App yang Sudah Ter-deploy
