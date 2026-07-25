@@ -196,6 +196,84 @@ def get_queue_album_art(np_track: str, np_artist: str,
         return None
 
 
+def get_currently_playing_data(
+    client_id: str, client_secret: str, refresh_token: str
+) -> tuple[bool, str | None, str | None, str | None, str | None]:
+    """Fetch full playback state from /v1/me/player/currently-playing.
+
+    Unlike get_queue_album_art, this function:
+      • Returns is_playing so callers can detect paused/stopped state.
+      • Returns full track metadata (song, artist, album) — not just art URL.
+      • Does NOT filter by track name — returns whatever Spotify is playing.
+
+    Response fields used:
+      is_playing          → True only when actively playing (not paused).
+      item.name           → song title.
+      item.artists[].name → artists (joined with ', ').
+      item.album.name     → album name.
+      item.album.images   → art URL (largest by pixel area).
+
+    Returns (is_playing, song, artist, album, art_url).
+    Returns (False, None, None, None, None) when:
+      - Nothing playing / paused (is_playing=false)
+      - 204 No Content (no active device)
+      - Playing a non-track (ad, podcast episode)
+      - Any network or token error
+    """
+    if not refresh_token or not client_id or not client_secret:
+        return False, None, None, None, None
+
+    token = _get_user_token(refresh_token, client_id, client_secret)
+    if not token:
+        return False, None, None, None, None
+
+    def _fetch(tok: str):
+        return requests.get(
+            "https://api.spotify.com/v1/me/player/currently-playing",
+            headers={"Authorization": f"Bearer {tok}"},
+            timeout=8,
+        )
+
+    try:
+        r = _fetch(token)
+
+        if r.status_code == 401:
+            _user_cache["access_token"] = None
+            _user_cache["expires_at"]   = 0.0
+            token = _get_user_token(refresh_token, client_id, client_secret)
+            if not token:
+                return False, None, None, None, None
+            r = _fetch(token)
+
+        if r.status_code == 204:
+            return False, None, None, None, None   # no active device / nothing playing
+
+        if r.status_code != 200:
+            print(f"[Spotify] currently-playing HTTP {r.status_code}")
+            return False, None, None, None, None
+
+        data       = r.json()
+        is_playing = data.get("is_playing", False)  # False = paused
+
+        item = data.get("item")
+        if not item:
+            return False, None, None, None, None   # ad or podcast episode
+
+        song   = item.get("name", "").strip() or None
+        artist = ", ".join(
+            a["name"] for a in item.get("artists", []) if a.get("name")
+        ) or None
+        album  = item.get("album", {}).get("name", "").strip() or None
+        art    = _best_image(item.get("album", {}).get("images", []))
+
+        return is_playing, song, artist, album, art
+
+    except Exception as exc:
+        print(f"[Spotify] currently-playing error: {exc}")
+        return False, None, None, None, None
+
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Strategy 2 — Search API (Client Credentials, any status)
 # ─────────────────────────────────────────────────────────────────────────────

@@ -23,9 +23,9 @@ _spotify_user_available = False   # User OAuth currently-playing (Strategy 1)
 if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
     try:
         from spotifyfetch import (
-            get_queue_album_art   as _get_spotify_queue_art,
-            get_spotify_album_art as _get_spotify_art,
-            get_recently_played   as _get_spotify_recent,
+            get_currently_playing_data as _get_spotify_currently_playing,
+            get_spotify_album_art      as _get_spotify_art,
+            get_recently_played        as _get_spotify_recent,
         )
         _spotify_available = True
         if SPOTIFY_REFRESH_TOKEN:
@@ -710,7 +710,8 @@ def run_listening_stats() -> None:
     cached_lanyard_song:  str | None = None  # song name from Lanyard (primary display)
     cached_lanyard_artist:str | None = None  # artist from Lanyard (collabs joined with ',')
     _spotify_lp_fetched:  bool     = False # True = tried Spotify recently-played for this track
-    spotify_fetched:      bool     = False # True = tried Spotify search/queue for this track
+    spotify_fetched:      bool     = False # True = tried Spotify currently-playing this track
+    search_fetched:       bool     = False # True = tried Spotify search for art this track
     cached_spotify_url:   str | None = None
 
     print("[LS] Thread started")
@@ -774,9 +775,15 @@ def run_listening_stats() -> None:
             now_playing, banner_url, np_track, np_artist, mbid, np_album, np_track_mbid = getRecentScrobble()
             print(f"[LS] Status: {now_playing} | {np_track} — {np_artist}")
 
-            # ─── bannerwidgettop: Lanyard → Spotify → Last.FM priority chain ───────────
-            # Save Last.FM art as the final fallback (may be None for dummy images).
-            # All art caches reset when the track changes.
+            # ─── Now Playing verification + Art priority chain ──────────────────────────────
+            # Priority 1: Lanyard  — real-time Discord presence, no auth, free.
+            # Priority 2: Spotify  — currently-playing API (is_playing + full data).
+            # Priority 0: Spotify  — recently-played (confirmed Last Played only).
+            # Priority 3: Spotify  — search (art fallback, Client Credentials only).
+            # Priority 4: Last.FM  — art final fallback.
+            #
+            # Lanyard + Spotify actively verify playing status every poll,
+            # overriding stale Last.FM "Now Playing" the moment the user pauses/stops.
             lastfm_banner_url = banner_url
 
             art_key = (np_track, np_artist)
@@ -789,13 +796,73 @@ def run_listening_stats() -> None:
                 _spotify_lp_fetched   = False
                 cached_spotify_url    = None
                 spotify_fetched       = False
+                search_fetched        = False
                 prev_art_key          = art_key
                 if DEBUG: print(f"[LS] Art cache cleared: {np_track}")
 
-            # Priority 0 (Last Played only) — Spotify recently-played
-            # When Discord/Lanyard has no active presence (user stopped playing),
-            # use Spotify's own recently-played API for accurate song, artist, album, art.
-            # Tried once per track (one-shot; Lanyard also won't have data for Last Played).
+            # ── Priority 1 — Lanyard ─────────────────────────────────────────────────
+            # Real-time Discord presence, no auth.
+            # Checked every poll when Now Playing (catches stops/pauses instantly).
+            # Checked once for Last Played (confirms status; won't have data).
+            if _lanyard_available and (now_playing == "Now Playing" or not lanyard_fetched):
+                _art, _lanyard_album, _lanyard_song, _lanyard_artist = _get_lanyard_art(USER_ID)
+                lanyard_fetched = True
+                if _lanyard_song:
+                    # Lanyard confirms: user IS actively streaming Spotify via Discord.
+                    now_playing = "Now Playing"
+                    _art_changed = (_art != cached_lanyard_url)
+                    cached_lanyard_url    = _art
+                    cached_lanyard_album  = _lanyard_album
+                    cached_lanyard_song   = _lanyard_song
+                    cached_lanyard_artist = _lanyard_artist
+                    # Only log when URL actually changes (not every poll).
+                    if _art and _art_changed:
+                        print("[LS] bannerwidgettop: Lanyard")
+
+                elif now_playing == "Now Playing":
+                    # Last.FM says Now Playing but Lanyard says not playing.
+                    # Verify with Spotify currently-playing before accepting the override.
+                    if _spotify_user_available:
+                        _is_playing, _sp_song, _sp_artist, _sp_album, _sp_art = \
+                            _get_spotify_currently_playing(
+                                SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN
+                            )
+                        spotify_fetched = True
+                        if _is_playing and _sp_song:
+                            # Spotify confirms active playback despite Lanyard being inactive.
+                            now_playing = "Now Playing"
+                            cached_lanyard_url    = _sp_art
+                            cached_lanyard_album  = _sp_album
+                            cached_lanyard_song   = _sp_song
+                            cached_lanyard_artist = _sp_artist
+                            if _sp_art: print(f"[LS] Now Playing: Spotify → {_sp_song}")
+                        else:
+                            # Both Lanyard and Spotify confirm not playing → override stale Last.FM.
+                            now_playing = "Last Played"
+                            print("[LS] Now Playing → Last Played (Lanyard + Spotify inactive)")
+                    # else: no Spotify credentials to verify.
+                    # User may be playing non-Spotify music (YouTube, SoundCloud, etc.).
+                    # Lanyard is used for art only — keep Last.FM's status.
+
+            elif now_playing == "Now Playing" and not _lanyard_available and _spotify_user_available:
+                _is_playing, _sp_song, _sp_artist, _sp_album, _sp_art = \
+                    _get_spotify_currently_playing(
+                        SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN
+                    )
+                spotify_fetched = True
+                if _is_playing and _sp_song:
+                    now_playing = "Now Playing"
+                    if cached_lanyard_song is None:
+                        cached_lanyard_url    = _sp_art
+                        cached_lanyard_album  = _sp_album
+                        cached_lanyard_song   = _sp_song
+                        cached_lanyard_artist = _sp_artist
+                    if _sp_art: print(f"[LS] Now Playing: Spotify → {_sp_song}")
+                else:
+                    now_playing = "Last Played"
+                    print("[LS] Now Playing → Last Played (Spotify inactive)")
+
+            # ── Priority 0 — Spotify recently-played ──────────────────────────────
             if (now_playing == "Last Played"
                     and cached_lanyard_song is None
                     and _spotify_user_available
@@ -811,55 +878,29 @@ def run_listening_stats() -> None:
                     cached_lanyard_artist = _sp_artist
                     print(f"[LS] Last Played: Spotify recently-played → {_sp_song} — {_sp_artist}")
 
-            # Priority 1 — Lanyard: Discord presence, no auth, free.
-            # Primary source for song, artist, album, and 640×640 album art.
-            # Retry every poll for 'Now Playing'; try once for 'Last Played'.
-            if cached_lanyard_song is None and _lanyard_available:
-                if not lanyard_fetched or now_playing == "Now Playing":
-                    _art, _lanyard_album, _lanyard_song, _lanyard_artist = _get_lanyard_art(USER_ID)
-                    lanyard_fetched = True
-                    if _lanyard_song:  # user is actively playing Spotify via Discord
-                        cached_lanyard_url    = _art
-                        cached_lanyard_album  = _lanyard_album
-                        cached_lanyard_song   = _lanyard_song
-                        cached_lanyard_artist = _lanyard_artist
-                        if _art:
-                            print("[LS] bannerwidgettop: Lanyard")
             banner_url = cached_lanyard_url
 
-            # Priority 2 — Spotify: try once per track (needs API call / auth).
-            # Skipped entirely if Lanyard already succeeded.
-            if banner_url is None and not spotify_fetched and (_spotify_available or _spotify_user_available):
-                _art = None
-                # Strategy 1: currently-playing API (exact match, no encoding issues)
-                if now_playing == "Now Playing" and _spotify_user_available:
-                    _art = _get_spotify_queue_art(
-                        np_track, np_artist,
-                        SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN,
-                    )
-                    if _art:
-                        print("[LS] bannerwidgettop: Spotify currently-playing")
-                # Strategy 2: search (Last Played or queue no match)
-                if _art is None and _spotify_available:
-                    _art = _get_spotify_art(
-                        np_track, np_artist,
-                        SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
-                    )
-                    if _art:
-                        _why = "Last Played" if now_playing != "Now Playing" else "queue no match"
-                        print(f"[LS] bannerwidgettop: Spotify search ({_why})")
+            # ── Priority 3 — Spotify search ─────────────────────────────────────────
+            # Art-only fallback when no art from Lanyard/currently-playing/recently-played.
+            # Uses Client Credentials (no user OAuth needed).
+            if banner_url is None and not search_fetched and _spotify_available:
+                _art = _get_spotify_art(
+                    cached_lanyard_song or np_track,
+                    cached_lanyard_artist or np_artist,
+                    SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
+                )
                 cached_spotify_url = _art
-                spotify_fetched    = True
-                if not _art:
-                    if DEBUG: print(f"[LS] bannerwidgettop: Spotify found no art for '{np_track}'")
+                search_fetched     = True
+                if _art:
+                    print("[LS] bannerwidgettop: Spotify search")
             if banner_url is None:
                 banner_url = cached_spotify_url
 
-            # Priority 3 — Last.FM: final fallback (may be None = dummy / no art)
+            # ── Priority 4 — Last.FM ──────────────────────────────────────────────────
             if banner_url is None and lastfm_banner_url:
                 banner_url = lastfm_banner_url
                 if DEBUG: print("[LS] bannerwidgettop: Last.FM")
-            # ──────────────────────────────────────────────────────────────
+            # ──────────────────────────────────────────────────────────────────────────
 
             # --- bannerwidgettop: resolve final URL ---
             # imgfixer ON  → download raw Last.FM URL, process with Pillow,
@@ -968,8 +1009,10 @@ def run_listening_stats() -> None:
                 if fixed_banner_url:
                     if IMGFIXER_ENABLED and _imgfixer_available:
                         print("[LS] bannerwidgettop: imgfixer → Discord CDN")
-                    else:
+                    elif "wsrv.nl" in fixed_banner_url:
                         print("[LS] bannerwidgettop: wsrv.nl proxy → OK")
+                    else:
+                        print("[LS] bannerwidgettop: direct URL → OK")
                 else:
                     print("[LS] bannerwidgettop: absent (no album art) → Discord will show fallback")
                 if fixed_banner_url:
