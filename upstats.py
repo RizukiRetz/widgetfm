@@ -288,8 +288,9 @@ def getLastFMImagePool(artist_name: str) -> list:
     - Source: artist name from Last.FM API (no disambiguation ambiguity)
     - Filter: only accepts 32-char MD5 hex hashes; skips named user uploads and blacklisted hashes
     - Multi-page: fetches additional pages up to POOL_MAX_IMAGES or POOL_MAX_PAGES
-    - URLs: converted from avatar170s thumbnails to 770x0 full-res, then proxied
-      through wsrv.nl for square crop + JPEG compression (300×300, q=80)
+    - URLs: converted from avatar170s thumbnails to 770x0 full-res and stored as-is.
+      Last.FM artist gallery images are already square/portrait — no crop needed.
+      Direct URLs are used because wsrv.nl cannot reliably access Last.FM's Fastly CDN.
     """
     if not artist_name:
         return []
@@ -357,11 +358,7 @@ def getLastFMImagePool(artist_name: str) -> list:
                 seen.add(img_hash)
 
                 full_url = src.replace("avatar170s", "770x0")
-                wsrv_url = (
-                    f"https://wsrv.nl/?url={full_url.replace('https://', '')}"
-                    f"&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80"
-                )
-                pool.append(wsrv_url)
+                pool.append(full_url)  # direct CDN URL; wsrv.nl cannot access Fastly reliably
 
                 if len(pool) >= POOL_MAX_IMAGES:
                     break
@@ -414,9 +411,10 @@ def getArtistImagePool(mbid: str, artist_name: str = "") -> list:
                 ]
                 audiodb = []
                 if thumb and thumb.strip():
-                    audiodb.append(thumb)
+                    audiodb.append(thumb)  # thumb — already portrait, no crop needed
                 for u in fanarts:
                     if u and u.strip():
+                        # AudioDB fanarts are landscape (1920×1080) — crop to square via wsrv.nl.
                         audiodb.append(
                             f"https://wsrv.nl/?url={u.replace('https://', '')}"
                             f"&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80"
@@ -436,14 +434,14 @@ def getArtistImagePool(mbid: str, artist_name: str = "") -> list:
 def _warm_url(url: str) -> None:
     """Fire-and-forget: stream-open a URL to warm proxy/CDN caches.
 
-    wsrv.nl processes and caches images on first GET request.  By triggering
-    the request in a background daemon thread right after `banner_mini_url` is
-    set, Discord's widget renderer gets a fast (cached) response instead of a
-    slow cold-cache delay.  No body is downloaded — just the headers.
+    For wsrv.nl URLs: triggers processing + caching so Discord's widget renderer
+    gets a fast (cached) response instead of a slow cold-cache delay.
+    For direct CDN URLs: confirms accessibility and warms any CDN edge caches.
+    No body is downloaded — just the response headers.
     """
     try:
         with requests.get(url, stream=True, timeout=8) as _:
-            pass  # headers received; wsrv.nl has processed + cached the image
+            pass  # headers received; cache warmed
     except Exception:
         pass
 
@@ -937,7 +935,7 @@ def run_listening_stats() -> None:
                     print(f"[LS] bannermini: {banner_mini_url}")
                     # Pre-warm wsrv.nl cache in background: ensures Discord
                     # gets a fast cached response when the widget renders.
-                    if banner_mini_url and "wsrv.nl" in banner_mini_url:
+                    if banner_mini_url:
                         threading.Thread(
                             target=_warm_url, args=(banner_mini_url,), daemon=True
                         ).start()
