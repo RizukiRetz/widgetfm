@@ -114,29 +114,38 @@ def get_pool_cached(artist_name: str, mbid: str = "", label: str = "Cache") -> l
         cached = _g_image_cache.get(artist_name, {})
         age_s  = time.time() - cached.get("fetched_at", 0)
         if cached.get("urls") and age_s < IMAGE_CACHE_TTL_DAYS * 86400:
-            # Retroactively filter blacklisted URLs and migrate Last.FM URLs to avatar300s (square crop)
+            # Retroactively filter blacklisted URLs and migrate all URLs to wsrv.nl proxy
             clean = []
             migrated = False
             for u in cached["urls"]:
                 if _is_blacklisted(u):
                     migrated = True
                     continue
-                
-                # Migrate old wsrv.nl Last.FM URLs to direct avatar300s
-                if u.startswith("https://wsrv.nl/?url=lastfm"):
-                    direct = "https://" + u.split("?url=")[1].split("&")[0]
-                    direct = direct.replace("770x0", "avatar300s")
-                    clean.append(direct)
-                    migrated = True
-                # Migrate existing 770x0 direct URLs to avatar300s
-                elif "lastfm.freetls.fastly.net" in u and "770x0" in u:
-                    clean.append(u.replace("770x0", "avatar300s"))
+                if u.startswith("https://wsrv.nl/?url="):
+                    # Ensure 770x0 Last.FM target inside wsrv.nl ends with .jpg extension
+                    if "770x0/" in u:
+                        parts = u.split("&", 1)
+                        target = parts[0]
+                        params = "&" + parts[1] if len(parts) > 1 else ""
+                        if not any(target.endswith(ext) for ext in [".jpg", ".png", ".jpeg", ".webp"]):
+                            u = f"{target}.jpg{params}"
+                            migrated = True
+                    clean.append(u)
+                elif "lastfm.freetls.fastly.net" in u:
+                    clean_u = u.replace("avatar300s", "770x0").replace("https://", "").replace("http://", "")
+                    if not any(clean_u.endswith(ext) for ext in [".jpg", ".png", ".jpeg", ".webp"]):
+                        clean_u += ".jpg"
+                    wsrv_url = (
+                        f"https://wsrv.nl/?url={clean_u}"
+                        f"&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80"
+                    )
+                    clean.append(wsrv_url)
                     migrated = True
                 else:
                     clean.append(u)
 
             if migrated:
-                print(f"[{label}] Migrated/cleaned cached pool for '{artist_name}'")
+                print(f"[{label}] Migrated cached pool for '{artist_name}' to wsrv.nl")
                 _g_image_cache[artist_name]["urls"] = clean
                 save_image_cache(dict(_g_image_cache))
             if DEBUG: print(f"[{label}] Pool '{artist_name}': {len(clean)} images (cache, {int(age_s // 3600)}h old)")
@@ -375,8 +384,14 @@ def getLastFMImagePool(artist_name: str) -> list:
                     continue
                 seen.add(img_hash)
 
-                full_url = src.replace("avatar170s", "avatar300s")
-                pool.append(full_url)  # direct CDN URL natively square cropped; wsrv.nl cannot access Fastly reliably
+                full_url = src.replace("avatar170s", "770x0")
+                if not any(full_url.endswith(ext) for ext in [".jpg", ".png", ".jpeg", ".webp"]):
+                    full_url += ".jpg"
+                wsrv_url = (
+                    f"https://wsrv.nl/?url={full_url.replace('https://', '')}"
+                    f"&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80"
+                )
+                pool.append(wsrv_url)
 
                 if len(pool) >= POOL_MAX_IMAGES:
                     break
@@ -1138,14 +1153,7 @@ def run_top_artists() -> None:
                 genre_str = ", ".join(g.title() for g in genres[:3])
 
                 # Use Last.FM pool image when available, fall back to stats.fm (Spotify CDN)
-                raw_img = artist_chosen_imgs.get(artist_name) or artist.get("image", "")
-                
-                # Proxy TA image through wsrv.nl with full parameters (770x0 -> 300x300 entropy crop)
-                if raw_img and "wsrv.nl" not in raw_img:
-                    clean_u = raw_img.replace("avatar300s", "770x0").replace("https://", "").replace("http://", "")
-                    img_url = f"https://wsrv.nl/?url={clean_u}&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80"
-                else:
-                    img_url = raw_img
+                img_url = artist_chosen_imgs.get(artist_name) or artist.get("image", "")
 
                 # Pre-warm the wsrv.nl TA image so Discord gets a fast cached response
                 if img_url:
