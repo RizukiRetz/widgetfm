@@ -122,19 +122,9 @@ def get_pool_cached(artist_name: str, mbid: str = "", label: str = "Cache") -> l
                     migrated = True
                     continue
                 if u.startswith("https://wsrv.nl/?url="):
-                    # Ensure 770x0 Last.FM target inside wsrv.nl ends with .jpg extension
-                    if "770x0/" in u:
-                        parts = u.split("&", 1)
-                        target = parts[0]
-                        params = "&" + parts[1] if len(parts) > 1 else ""
-                        if not any(target.endswith(ext) for ext in [".jpg", ".png", ".jpeg", ".webp"]):
-                            u = f"{target}.jpg{params}"
-                            migrated = True
                     clean.append(u)
                 elif "lastfm.freetls.fastly.net" in u:
                     clean_u = u.replace("avatar300s", "770x0").replace("https://", "").replace("http://", "")
-                    if not any(clean_u.endswith(ext) for ext in [".jpg", ".png", ".jpeg", ".webp"]):
-                        clean_u += ".jpg"
                     wsrv_url = (
                         f"https://wsrv.nl/?url={clean_u}"
                         f"&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80"
@@ -385,8 +375,6 @@ def getLastFMImagePool(artist_name: str) -> list:
                 seen.add(img_hash)
 
                 full_url = src.replace("avatar170s", "770x0")
-                if not any(full_url.endswith(ext) for ext in [".jpg", ".png", ".jpeg", ".webp"]):
-                    full_url += ".jpg"
                 wsrv_url = (
                     f"https://wsrv.nl/?url={full_url.replace('https://', '')}"
                     f"&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80"
