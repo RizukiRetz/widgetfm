@@ -319,6 +319,13 @@ def getLastFMImagePool(artist_name: str) -> list:
         "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
+        "Referer":         "https://www.last.fm/",
+        "Sec-Fetch-Dest":  "document",
+        "Sec-Fetch-Mode":  "navigate",
+        "Sec-Fetch-Site":  "same-origin",
+        "Sec-Fetch-User":  "?1",
+        "Cache-Control":   "max-age=0",
+        "Connection":      "keep-alive",
     }
 
     seen        = set()
@@ -326,6 +333,9 @@ def getLastFMImagePool(artist_name: str) -> list:
     total_pages = 1   # updated from pagination on the first page
 
     try:
+        session = requests.Session()
+        session.headers.update(headers)
+
         for page in range(1, POOL_MAX_PAGES + 1):
             if len(pool) >= POOL_MAX_IMAGES or page > total_pages:
                 break
@@ -334,14 +344,21 @@ def getLastFMImagePool(artist_name: str) -> list:
 
             # Retry up to 3 times on 5xx errors (Last.FM occasionally returns 502)
             for attempt in range(3):
-                r = requests.get(url, headers=headers, timeout=8)
+                r = session.get(url, timeout=8)
                 if r.status_code < 500:
                     break
                 if attempt < 2:
                     print(f"[LS] Last.FM {r.status_code} on page {page}, retry {attempt + 1}/3...")
                     time.sleep(2)
+
+            # 406 = Last.FM rejected the scrape (anti-bot), skip gracefully
+            if r.status_code == 406:
+                if DEBUG: print(f"[LS] Last.FM 406 for '{artist_name}' page {page}, skipping")
+                break
+
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "html.parser")
+
 
             # Detect total page count from pagination (only needed on the first page)
             if page == 1:
