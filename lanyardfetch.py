@@ -45,7 +45,7 @@ def get_lanyard_album_art(
         return None, None, None, None
 
     try:
-        r = requests.get(f"{LANYARD_API}/{user_id}", timeout=6)
+        r = requests.get(f"{LANYARD_API}/{user_id}", timeout=10)
 
         if r.status_code != 200:
             return None, None, None, None
