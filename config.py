@@ -188,7 +188,7 @@ IMAGE_CACHE_TTL_DAYS = 30   # days before re-scraping Last.FM for an artist's im
 # Find the hash in the log: "[LS] Last.FM page 1: ..." → copy from the wsrv.nl URL
 # Example URL: https://wsrv.nl/?url=lastfm.freetls.fastly.net/i/u/770x0/<hash>&...
 BLACKLISTED_HASHES: set[str] = {
-    # "309a64bc97a0c73ac25968e6b4f0aa69",  # wrong photo on Kyra Fields page
+     "1b484577562c41de80266987ec06efb7",  # wrong photo on Kyra Fields page
 }
 
 # ── HTTP headers ──────────────────────────────────────────────────────────────
