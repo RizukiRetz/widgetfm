@@ -113,7 +113,7 @@ def get_pool_cached(artist_name: str, mbid: str = "", label: str = "Cache") -> l
     with _g_cache_lock:
         cached = _g_image_cache.get(artist_name, {})
         age_s  = time.time() - cached.get("fetched_at", 0)
-        if cached.get("urls") and age_s < IMAGE_CACHE_TTL_DAYS * 86400:
+        if cached.get("urls") and (not IMAGE_CACHE_TTL_DAYS or age_s < IMAGE_CACHE_TTL_DAYS * 86400):
             # Retroactively filter blacklisted URLs and migrate all URLs to wsrv.nl proxy
             clean = []
             migrated = False
@@ -157,15 +157,20 @@ def get_pool_cached(artist_name: str, mbid: str = "", label: str = "Cache") -> l
 
 def discordPatch(app_id: str, bot_token: str, payload: dict, label: str = "") -> int:
     """PATCH the Discord profile widget for the given application."""
-    r = requests.patch(
-        url=f"https://discord.com/api/v9/applications/{app_id}/users/{USER_ID}/identities/0/profile",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bot {bot_token}",
-            "User-Agent": "DiscordBot (https://github.com/discord/discord-api-docs, 1.0.0)",
-        },
-        data=json.dumps(payload, separators=(",", ":")),
-    )
+    try:
+        r = requests.patch(
+            url=f"https://discord.com/api/v9/applications/{app_id}/users/{USER_ID}/identities/0/profile",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bot {bot_token}",
+                "User-Agent": "DiscordBot (https://github.com/discord/discord-api-docs, 1.0.0)",
+            },
+            data=json.dumps(payload, separators=(",", ":")),
+            timeout=15,
+        )
+    except requests.exceptions.RequestException as exc:
+        print(f"[{label}] Discord PATCH network error: {exc}")
+        return 0
 
     remaining   = r.headers.get("X-RateLimit-Remaining", "?")
     limit       = r.headers.get("X-RateLimit-Limit", "?")
@@ -197,7 +202,7 @@ def discordPatch(app_id: str, bot_token: str, payload: dict, label: str = "") ->
 
 def getUserInfo() -> tuple:
     """Fetch total scrobbles, artists, albums and tracks from Last.FM."""
-    r    = requests.get(f"http://ws.audioscrobbler.com/2.0/?method=user.getinfo&user={LAST_FM_USERNAME}&api_key={API_KEY}&format=json")
+    r    = requests.get(f"http://ws.audioscrobbler.com/2.0/?method=user.getinfo&user={LAST_FM_USERNAME}&api_key={API_KEY}&format=json", timeout=10)
     data = r.json()
     return (
         int(data["user"]["playcount"]),
@@ -490,7 +495,7 @@ def getRecentScrobble() -> tuple:
     """Fetch the most recent (or currently playing) track from Last.FM."""
     r    = requests.get(
         f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks"
-        f"&user={LAST_FM_USERNAME}&limit=1&api_key={API_KEY}&format=json"
+        f"&user={LAST_FM_USERNAME}&limit=1&api_key={API_KEY}&format=json", timeout=10,
     )
     data         = r.json()
     track        = data["recenttracks"]["track"][0]
@@ -1262,17 +1267,27 @@ if __name__ == "__main__":
     _g_image_cache.update(load_image_cache())
     print(f"[Cache] Global cache ready: {len(_g_image_cache)} artist(s) cached")
 
-    threads = []
+    active_workers = {}
     if effective_ls:
-        threads.append(threading.Thread(target=run_listening_stats, name="ListeningStats", daemon=True))
+        active_workers["ListeningStats"] = run_listening_stats
     if effective_ta:
-        threads.append(threading.Thread(target=run_top_artists,     name="TopArtists",     daemon=True))
+        active_workers["TopArtists"] = run_top_artists
 
-    for t in threads:
+    running_threads = {}
+    for name, target_fn in active_workers.items():
+        t = threading.Thread(target=target_fn, name=name, daemon=True)
         t.start()
+        running_threads[name] = t
 
     try:
         while True:
-            time.sleep(1)
+            time.sleep(5)
+            for name, target_fn in active_workers.items():
+                t = running_threads.get(name)
+                if t is None or not t.is_alive():
+                    print(f"[WATCHDOG] ⚠ Thread '{name}' stopped unexpectedly! Auto-restarting...")
+                    new_t = threading.Thread(target=target_fn, name=name, daemon=True)
+                    new_t.start()
+                    running_threads[name] = new_t
     except KeyboardInterrupt:
         print("\n[EXIT] Stopped by user (Ctrl+C).")

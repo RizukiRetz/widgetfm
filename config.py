@@ -180,7 +180,7 @@ TA_SUBTITLE3 = ""
 
 # ── Image cache ───────────────────────────────────────────────────────────────
 IMAGE_CACHE_FILE     = "image_cache.json"
-IMAGE_CACHE_TTL_DAYS = 30   # days before re-scraping Last.FM for an artist's images
+IMAGE_CACHE_TTL_DAYS = 0    # 0 or None = OFF (never expire / never re-scrape existing artists)
                              # re-deploy after this period to bundle a fresh cache
 
 # ── Blacklisted image hashes ──────────────────────────────────────────────────
