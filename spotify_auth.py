@@ -21,11 +21,12 @@ from dotenv import load_dotenv, set_key
 import requests
 
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
-SCOPES       = (
-    "user-read-currently-playing "
-    "user-read-playback-state "
-    "user-read-recently-played"   # needed for Last Played → recently-played API
-)
+SCOPES       = " ".join([
+    "user-read-currently-playing",
+    "user-read-playback-state",
+    "user-library-read",
+    "user-read-recently-played",   # needed for Last Played → recently-played API
+])
 PORT         = 8888
 
 load_dotenv()
