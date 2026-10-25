@@ -5,6 +5,12 @@ Real-time Discord profile widget that displays your Last.FM listening stats and 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
 
+> [!WARNING]
+> **Discord Custom Widgets Experiment Ended:**
+> Discord has officially discontinued the Custom Widgets experiment. It is **no longer possible for new users to create or configure new custom widgets**.
+>
+> **For Existing Users:** If you have already created and configured your custom widgets prior to the deprecation, they **continue to work normally** and will still receive real-time updates from this bot.
+
 ---
 
 ## Showcase
@@ -92,6 +98,12 @@ On Windows you can also double-click `run.bat`.
 ---
 
 ## Discord Application Setup
+
+> [!CAUTION]
+> **Notice for New Users:**
+> Discord has ended the custom widgets experiment. It is no longer possible to create new custom widgets or unlock the widget editor for new applications.
+>
+> This setup section is preserved for **existing users** who already created and configured their widgets before the experiment ended.
 
 You need **two separate Discord Applications** — one for each widget.
 
