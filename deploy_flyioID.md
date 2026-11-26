@@ -57,8 +57,7 @@ Secrets disimpan terenkripsi di Fly.io dan tidak akan pernah terlihat setelah di
 
 ```powershell
 flyctl secrets set `
-  LAST_FM_USERNAME="(username Last.FM kamu)" `
-  API_KEY="(Last.FM API key kamu)" `
+  STATSFM_USERNAME="(username stats.fm kamu)" `
   USER_ID="(Discord user ID kamu)" `
   APPLICATION_ID="(Application ID widget Listening Stats)" `
   BOT_TOKEN="(Bot Token widget Listening Stats)" `
@@ -69,10 +68,7 @@ flyctl secrets set `
 **Secrets opsional** — tambahkan hanya jika kamu menggunakan fitur ini:
 
 ```powershell
-# stats.fm — wajib untuk widget Top Artists dan slot hoursstreamed/minutesstreamed
-flyctl secrets set STATSFM_USERNAME="(username stats.fm kamu)"
-
-# Spotify — fallback album art (jalankan spotify_auth.py di lokal dulu)
+# Spotify — fallback album art / currently-playing (jalankan spotify_auth.py di lokal dulu)
 flyctl secrets set `
   SPOTIFY_CLIENT_ID="(Spotify Client ID)" `
   SPOTIFY_CLIENT_SECRET="(Spotify Client Secret)" `

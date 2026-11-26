@@ -1,6 +1,13 @@
 import re, requests, json, sys, time, random, threading, urllib.parse
 from bs4 import BeautifulSoup
 from config import *
+from statsfmfetch import (
+    get_user_stats       as _sf_get_user_stats,
+    get_recent_stream    as _sf_get_recent_stream,
+    get_track_play_count as _sf_get_track_play_count,
+    get_top_items        as _sf_get_top_items,
+    _norm                as _sf_norm,
+)
 
 # ── Optional: imgfixer (album art processor) ──────────────────────────────────────
 # Loaded at startup only when IMGFIXER_ENABLED = True in config.py.
@@ -197,101 +204,72 @@ def discordPatch(app_id: str, bot_token: str, payload: dict, label: str = "") ->
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Listening Stats — data fetchers
+# Listening Stats — data fetchers (stats.fm API v2)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def getUserInfo() -> tuple:
-    """Fetch total scrobbles, artists, albums and tracks from Last.FM."""
-    r    = requests.get(f"http://ws.audioscrobbler.com/2.0/?method=user.getinfo&user={LAST_FM_USERNAME}&api_key={API_KEY}&format=json", timeout=10)
-    data = r.json()
-    return (
-        int(data["user"]["playcount"]),
-        int(data["user"]["artist_count"]),
-        int(data["user"]["album_count"]),
-        int(data["user"]["track_count"]),
+def getUserStats() -> dict:
+    """Fetch lifetime listening stats from stats.fm (count, tracks, artists, albums, hours, minutes)."""
+    stats = _sf_get_user_stats(
+        STATSFM_USERNAME,
+        api_base=STATSFM_API_BASE,
+        headers=STATSFM_HEADERS,
     )
+    if DEBUG:
+        print(
+            f"[LS] stats.fm lifetime: {stats['scrobbles']:,} streams | "
+            f"{stats['totaltracks']:,} tracks | {stats['totalalbums']:,} albums | "
+            f"{stats['totalartists']:,} artists | {stats['hoursstreamed']:,}h"
+        )
+    return stats
 
-
-def getStreamStats() -> tuple:
-    """Fetch total hours and minutes streamed from stats.fm (lifetime).
-    Returns (None, None) when STATSFM_USERNAME is not configured.
-    """
-    if not STATSFM_USERNAME:
-        return None, None
-    r    = requests.get(
-        f"https://api.stats.fm/api/v1/users/{STATSFM_USERNAME}/streams/stats?range=lifetime",
-        headers=STATSFM_HEADERS, timeout=10,
-    )
-    data = r.json()
-    if "items" not in data:
-        print(f"[LS] Unexpected stats.fm response: {data}")
-        raise KeyError(f"'items' key missing. Keys present: {list(data.keys())}")
-    duration_ms      = data["items"]["durationMs"]
-    hours_streamed   = duration_ms // 3_600_000
-    minutes_streamed = duration_ms // 60_000
-    if DEBUG: print(f"[LS] stats.fm: {hours_streamed:,} hours | {minutes_streamed:,} minutes")
-    return hours_streamed, minutes_streamed
 
 def getTopStat(type_: str, period: str, user_info: dict | None = None) -> tuple[str, str]:
     """Return (value_str, label_str) for a configurable Listening Stats slot.
 
-    Handles all configurable types:
-      Static (no API call — reads from user_info dict):
-        scrobbles, totalalbums, totalartists, totaltracks
-      Last.FM top* (one API call per unique type+period):
-        topartist, toptrack, topalbum
-      stats.fm (optional — requires STATSFM_USERNAME):
+    All slots are powered by stats.fm API v2 (no Last.FM API key needed):
+      Static (no extra API call — reads from already-fetched user_info dict):
+        scrobbles, totalalbums, totalartists, totaltracks,
         hoursstreamed, minutesstreamed
+      stats.fm top* (one API call per unique type+period):
+        topartist, toptrack, topalbum
 
     Returns ('\u2014', label) gracefully on error or missing config.
     """
     period_label = LS_PERIOD_LABELS.get(period, period)
     base_label   = LS_TYPE_LABELS.get(type_, type_)
 
-    # ── Static types: read from already-fetched getUserInfo() data ─────────────
-    if type_ in ("scrobbles", "totalalbums", "totalartists", "totaltracks"):
-        count = (user_info or {}).get(type_, 0)
-        return f"{count:,}", base_label
+    # ── Static lifetime types: read directly from getUserStats() dict ────────
+    if type_ in (
+        "scrobbles", "totalalbums", "totalartists", "totaltracks",
+        "hoursstreamed", "minutesstreamed",
+    ):
+        count = (user_info or {}).get(type_)
+        return (f"{count:,}" if count is not None else "—"), base_label
 
-    # ── stats.fm types (optional) ───────────────────────────────────────────
-    if type_ in ("hoursstreamed", "minutesstreamed"):
-        if not STATSFM_USERNAME:
-            return "—", base_label
-        h, m = getStreamStats()
-        val = h if type_ == "hoursstreamed" else m
-        return (f"{val:,}" if val is not None else "—"), base_label
-
-    # ── Last.FM top* types ───────────────────────────────────────────────
-    method_map = {
-        "topartist": "user.gettopartists",
-        "toptrack":  "user.gettoptracks",
-        "topalbum":  "user.gettopalbums",
+    # ── stats.fm top* types ──────────────────────────────────────────────────
+    kind_map = {
+        "topartist": ("artists", "artist"),
+        "toptrack":  ("tracks",  "track"),
+        "topalbum":  ("albums",  "album"),
     }
-    method = method_map.get(type_)
-    if not method:
+    entry = kind_map.get(type_)
+    if not entry:
         return "—", base_label
 
+    kind, item_key = entry
     label = f"{base_label} ({period_label})"
     try:
-        r    = requests.get(
-            "https://ws.audioscrobbler.com/2.0/",
-            params={
-                "method":  method,
-                "user":    LAST_FM_USERNAME,
-                "api_key": API_KEY,
-                "format":  "json",
-                "limit":   1,
-                "period":  period,
-            },
-            timeout=10,
+        items = _sf_get_top_items(
+            STATSFM_USERNAME,
+            kind=kind,
+            period=period,
+            limit=1,
+            api_base=STATSFM_API_BASE,
+            headers=STATSFM_HEADERS,
         )
-        data = r.json()
-        if type_ == "topartist":
-            name = data["topartists"]["artist"][0]["name"]
-        elif type_ == "toptrack":
-            name = data["toptracks"]["track"][0]["name"]
-        else:  # topalbum
-            name = data["topalbums"]["album"][0]["name"]
+        if not items or item_key not in items[0]:
+            return "—", label
+        name = items[0][item_key]["name"]
         if DEBUG: print(f"[LS] getTopStat {type_}/{period}: {name}")
         return name, label
     except Exception as exc:
@@ -491,36 +469,29 @@ def _warm_url(url: str) -> None:
         pass
 
 
-def getRecentScrobble() -> tuple:
-    """Fetch the most recent (or currently playing) track from Last.FM."""
-    r    = requests.get(
-        f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks"
-        f"&user={LAST_FM_USERNAME}&limit=1&api_key={API_KEY}&format=json", timeout=10,
+def getRecentStream() -> tuple:
+    """Fetch the currently playing or most recent track from stats.fm v2 API.
+
+    Returns:
+      (now_playing, banner_url, np_track, np_artist, primary_artist,
+       np_album, statsfm_track_id, spotify_track_id, artist_image)
+    """
+    now_playing, info = _sf_get_recent_stream(
+        STATSFM_USERNAME,
+        api_base=STATSFM_API_BASE,
+        headers=STATSFM_HEADERS,
     )
-    data         = r.json()
-    track        = data["recenttracks"]["track"][0]
-    is_playing   = track.get("@attr", {}).get("nowplaying") == "true"
-    now_playing  = "Now Playing" if is_playing else "Last Played"
-    raw_banner   = track["image"][3]["#text"]
-
-    # Return the raw Last.FM URL — the caller (run_listening_stats) will decide
-    # whether to proxy it through wsrv.nl (imgfixer OFF) or feed it directly to
-    # imgfixer for local processing + Discord CDN re-hosting (imgfixer ON).
-    if not raw_banner:
-        banner_url = None
-        if DEBUG: print("[LS] bannerwidgettop: Last.FM returned no image URL")
-    elif LASTFM_DUMMY_HASH in raw_banner:
-        banner_url = None
-        if DEBUG: print("[LS] bannerwidgettop: Last.FM placeholder image — trying fallback sources")
-    else:
-        banner_url = raw_banner  # raw Last.FM CDN URL
-
-    np_track      = track["name"]
-    np_artist     = track["artist"]["#text"]
-    np_album      = track.get("album", {}).get("#text", "")  # scrobble metadata album (fallback)
-    np_track_mbid = track.get("mbid", "")                    # track MBID — more reliable than name for API lookup
-    mbid          = track["artist"].get("mbid", "")
-    return now_playing, banner_url, np_track, np_artist, mbid, np_album, np_track_mbid
+    return (
+        now_playing,
+        info["banner_url"],
+        info["track"],
+        info["artist"],
+        info["primary_artist"],
+        info["album"],
+        info["track_id"],
+        info["spotify_id"],
+        info["artist_image"],
+    )
 
 
 
@@ -557,91 +528,31 @@ def _normalize_title(s: str) -> str:
     )
 
 
-def getTrackInfo(artist: str, track: str, track_mbid: str = "") -> tuple:
-    """Fetch per-user play count and album title for the current track.
+def getTrackPlayCount(
+    artist: str,
+    track: str,
+    track_id: int | None = None,
+    spotify_track_id: str | None = None,
+) -> int:
+    """Fetch per-user lifetime play count for a track via stats.fm v2 API.
 
-    Tries up to 3 lookup strategies so tracks with special characters
-    (e.g. '<3', '&', '>') still resolve correctly:
-
-      1. MBID lookup — bypasses all name/encoding issues (best, when available)
-      2. Exact name lookup — works for the vast majority of tracks
-      3. html.escape(name) — Last.FM's server sometimes accepts '&lt;' where '<'
-         fails, covering edge cases like 'u + me = <3'
-
-    Returns (userplaycount: int, album_title: str | None).
-    Returns (0, None) when all strategies fail or on network error.
+    Uses the numeric stats.fm track ID directly when available, or resolves it
+    via stats.fm track search (for tracks detected early by Lanyard/Spotify).
+    Returns 0 on lookup failure (rendered as '1st Play').
     """
-    import html as _html
-
     try:
-        base = {
-            "method":  "track.getInfo",
-            "user":    LAST_FM_USERNAME,
-            "api_key": API_KEY,
-            "format":  "json",
-        }
-
-        # Build list of params dicts to try in order
-        attempts: list[dict] = []
-
-        if track_mbid:
-            attempts.append({**base, "mbid": track_mbid})
-
-        attempts.append({**base, "artist": artist, "track": track})
-
-        # Strategy 3: pre-encode '+' for Last.FM's double-URL-decode quirk.
-        # Last.FM server decodes query params TWICE. For tracks with '+' in the
-        # name (e.g. "u + me = <3"), standard %2B gets double-decoded to '+',
-        # but if we send %252B (double-encoded '+'), it double-decodes correctly:
-        #   %252B → first decode → %2B → second decode → + ✓
-        # Also keep '=' unencoded (safe) — Last.FM handles literal '=' in values.
-        if "+" in track:
-            from urllib.parse import quote_plus as _qp
-            _pre    = track.replace("+", "%2B")
-            _track  = _qp(_pre, safe="=")
-            _artist = _qp(artist)
-            _user   = _qp(LAST_FM_USERNAME)
-            _key    = _qp(API_KEY)
-            attempts.append(
-                f"http://ws.audioscrobbler.com/2.0/"
-                f"?method=track.getInfo&user={_user}&api_key={_key}"
-                f"&format=json&artist={_artist}&track={_track}"
-            )
-
-        data: dict | None = None
-        for i, attempt in enumerate(attempts, start=1):
-            if isinstance(attempt, str):
-                r = requests.get(attempt, timeout=8)          # raw pre-built URL
-            else:
-                r = requests.get("http://ws.audioscrobbler.com/2.0/",
-                                 params=attempt, timeout=8)   # params dict
-            if DEBUG: print(f"[LS] track.getInfo attempt {i}/{len(attempts)}: {r.url}")
-            data = r.json()
-            if "error" not in data:
-                break   # success — stop trying
-
-        if not data or "error" in data:
-            msg = (data.get("message", f"error {data.get('error', '?')}") if data
-                   else "no response")
-            print(f"[LS] track.getInfo: all {len(attempts)} lookups failed ({msg})"
-                  " — treating as 1st scrobble")
-            return 0, None
-
-        track_data  = data["track"]
-        count       = int(track_data.get("userplaycount", 0))
-
-        album_title = None
-        album       = track_data.get("album")
-        if album:
-            raw_title = album.get("title", "").strip()
-            if raw_title:
-                album_title = _EXPLICIT_RE.sub("", raw_title).strip()
-
-        return count, album_title
-
+        return _sf_get_track_play_count(
+            STATSFM_USERNAME,
+            track_id=track_id,
+            title=track,
+            artist=artist,
+            spotify_track_id=spotify_track_id,
+            api_base=STATSFM_API_BASE,
+            headers=STATSFM_HEADERS,
+        )
     except Exception as exc:
-        print(f"[LS] track.getInfo error: {exc}")
-        return 0, None
+        print(f"[LS] stats.fm track stats error: {exc}")
+        return 0
 
 
 
@@ -712,16 +623,15 @@ def format_npcount(count: int, album_title, track_name: str) -> str:
 
 
 def getTopArtists(range_: str = "lifetime", limit: int = 5) -> list:
-    """Fetch the top N artists for the configured stats.fm user."""
-    r    = requests.get(
-        f"https://api.stats.fm/api/v1/users/{STATSFM_USERNAME}/top/artists?range={range_}",
-        headers=STATSFM_HEADERS, timeout=10,
+    """Fetch the top N artists for the configured stats.fm user (API v2)."""
+    return _sf_get_top_items(
+        STATSFM_USERNAME,
+        kind="artists",
+        period=range_,
+        limit=limit,
+        api_base=STATSFM_API_BASE,
+        headers=STATSFM_HEADERS,
     )
-    data = r.json()
-    if "items" not in data:
-        print(f"[TA] Unexpected response: {data}")
-        raise KeyError(f"'items' key missing. Keys present: {list(data.keys())}")
-    return data["items"][:limit]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -729,32 +639,27 @@ def getTopArtists(range_: str = "lifetime", limit: int = 5) -> list:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def run_listening_stats() -> None:
-    """Continuously poll Last.FM and stats.fm, then PATCH the Listening Stats widget."""
+    """Continuously poll stats.fm (+ Lanyard/Spotify), then PATCH the Listening Stats widget."""
     cached_slow     = None
     last_slow_fetch = 0
     prev_payload    = None
-    prev_mbid       = None
-    prev_npartist   = None   # fallback artist-change detection when MBID is empty (new/indie artists)
+    prev_npartist   = None
     prev_nptrack    = None
     cached_pool:     list  = []
     banner_mini_url         = None
-    prev_npcount_key:  tuple = ()    # (track_name, artist_name) — re-fetch on change
+    prev_npcount_key:  tuple = ()    # (display_track, display_artist) — re-fetch on change
     cached_npcount:    str   = ""    # last formatted npcount string
 
-    # ─ Art priority chain state ────────────────────────────────────────────
-    # All vars reset whenever the track changes (prev_art_key mismatch).
-    # Lanyard retries every poll for 'Now Playing' (user IS listening),
-    # but only once per track for 'Last Played' (track name won't match).
-    # Spotify tries once per track regardless of status.
-    prev_art_key:         tuple    = ()    # (np_track, np_artist)
-    lanyard_fetched:      bool     = False # True = tried Lanyard for this track
-    cached_lanyard_url:   str | None = None
-    cached_lanyard_album: str | None = None  # album from Lanyard (Spotify Rich Presence)
-    cached_lanyard_song:  str | None = None  # song name from Lanyard (primary display)
-    cached_lanyard_artist:str | None = None  # artist from Lanyard (collabs joined with ',')
-    _spotify_lp_fetched:  bool     = False # True = tried Spotify recently-played for this track
-    spotify_fetched:      bool     = False # True = tried Spotify currently-playing this track
-    search_fetched:       bool     = False # True = tried Spotify search for art this track
+    # ─ Art / live-playback priority chain state ─────────────────────────────
+    prev_art_key:         tuple      = ()
+    prev_live_url:        str | None = None
+    _spotify_lp_fetched:  bool       = False # True = tried Spotify recently-played for this track
+    cached_lp_url:        str | None = None  # matched Spotify recently-played art
+    cached_lp_album:      str | None = None
+    cached_lp_song:       str | None = None
+    cached_lp_artist:     str | None = None
+    prev_search_key:      tuple      = ()    # (display_track, display_artist) for Spotify search
+    search_fetched:       bool       = False # True = tried Spotify search for current display track
     cached_spotify_url:   str | None = None
 
     print("[LS] Thread started")
@@ -764,13 +669,7 @@ def run_listening_stats() -> None:
         try:
             # --- Slow data: refresh every LS_SLOW_INTERVAL seconds ---
             if cached_slow is None or (now - last_slow_fetch) >= LS_SLOW_INTERVAL:
-                scrobbles, total_artists, total_albums, total_tracks = getUserInfo()
-                ui = {
-                    "scrobbles":    scrobbles,
-                    "totalalbums":  total_albums,
-                    "totalartists": total_artists,
-                    "totaltracks":  total_tracks,
-                }
+                ui = getUserStats()
                 # Fetch all slots — deduplicate API calls for identical type+period.
                 _slot_cfgs = [
                     (LS_STAT1_TYPE, LS_STAT1_PERIOD),
@@ -814,143 +713,146 @@ def run_listening_stats() -> None:
                  stat5_val, stat5_label, stat6_val, stat6_label,
                  lsmini) = cached_slow
 
-            # --- Fast data: every LS_FAST_INTERVAL seconds ---
-            now_playing, banner_url, np_track, np_artist, mbid, np_album, np_track_mbid = getRecentScrobble()
-            print(f"[LS] Status: {now_playing} | {np_track} — {np_artist}")
+            # --- Fast data: every LS_FAST_INTERVAL seconds (stats.fm v2 API) ---
+            (now_playing, statsfm_banner_url, np_track, np_artist,
+             primary_artist, np_album, sf_track_id, sp_track_id, sf_artist_img) = getRecentStream()
 
             # ─── Now Playing verification + Art priority chain ──────────────────────────────
-            # Priority 1: Lanyard  — real-time Discord presence, no auth, free.
-            # Priority 2: Spotify  — currently-playing API (is_playing + full data).
-            # Priority 0: Spotify  — recently-played (confirmed Last Played only).
-            # Priority 3: Spotify  — search (art fallback, Client Credentials only).
-            # Priority 4: Last.FM  — art final fallback.
-            #
-            # Lanyard + Spotify actively verify playing status every poll,
-            # overriding stale Last.FM "Now Playing" the moment the user pauses/stops.
-            lastfm_banner_url = banner_url
-
+            # Priority 1: Lanyard  — real-time Discord presence, no auth, free (checked every poll).
+            # Priority 2: Spotify  — currently-playing API (verifies active playback).
+            # Priority 3: Spotify  — recently-played (Last Played, only if title matches stats.fm).
+            # Priority 4: Spotify  — search (art fallback, Client Credentials only).
+            # Priority 5: stats.fm — final art fallback for bannerwidgettop ONLY (never for bannermini).
             art_key = (np_track, np_artist)
             if art_key != prev_art_key:
-                cached_lanyard_url    = None
-                cached_lanyard_album  = None
-                cached_lanyard_song   = None
-                cached_lanyard_artist = None
-                lanyard_fetched       = False
-                _spotify_lp_fetched   = False
-                cached_spotify_url    = None
-                spotify_fetched       = False
-                search_fetched        = False
-                prev_art_key          = art_key
+                _spotify_lp_fetched = False
+                cached_lp_url       = None
+                cached_lp_album     = None
+                cached_lp_song      = None
+                cached_lp_artist    = None
+                prev_art_key        = art_key
                 if DEBUG: print(f"[LS] Art cache cleared: {np_track}")
 
-            # ── Priority 1 — Lanyard ─────────────────────────────────────────────────
-            # Real-time Discord presence, no auth.
-            # Checked every poll when Now Playing (catches stops/pauses instantly).
-            # Checked once for Last Played (confirms status; won't have data).
-            if _lanyard_available and (now_playing == "Now Playing" or not lanyard_fetched):
+            live_url:    str | None = None
+            live_album:  str | None = None
+            live_song:   str | None = None
+            live_artist: str | None = None
+
+            # ── Priority 1 — Lanyard (real-time Discord presence) ────────────────────
+            if _lanyard_available:
                 _art, _lanyard_album, _lanyard_song, _lanyard_artist = _get_lanyard_art(USER_ID)
-                lanyard_fetched = True
                 if _lanyard_song:
                     # Lanyard confirms: user IS actively streaming Spotify via Discord.
                     now_playing = "Now Playing"
-                    _art_changed = (_art != cached_lanyard_url)
-                    cached_lanyard_url    = _art
-                    cached_lanyard_album  = _lanyard_album
-                    cached_lanyard_song   = _lanyard_song
-                    cached_lanyard_artist = _lanyard_artist
-                    # Only log when URL actually changes (not every poll).
-                    if _art and _art_changed:
+                    live_url    = _art
+                    live_album  = _lanyard_album
+                    live_song   = _lanyard_song
+                    live_artist = _lanyard_artist
+                    if _art and _art != prev_live_url:
                         print("[LS] bannerwidgettop: Lanyard")
-
                 elif now_playing == "Now Playing":
-                    # Last.FM says Now Playing but Lanyard says not playing.
+                    # stats.fm says Now Playing but Lanyard says not playing.
                     # Verify with Spotify currently-playing before accepting the override.
                     if _spotify_user_available:
                         _is_playing, _sp_song, _sp_artist, _sp_album, _sp_art = \
                             _get_spotify_currently_playing(
                                 SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN
                             )
-                        spotify_fetched = True
                         if _is_playing and _sp_song:
-                            # Spotify confirms active playback despite Lanyard being inactive.
                             now_playing = "Now Playing"
-                            cached_lanyard_url    = _sp_art
-                            cached_lanyard_album  = _sp_album
-                            cached_lanyard_song   = _sp_song
-                            cached_lanyard_artist = _sp_artist
-                            if _sp_art: print(f"[LS] Now Playing: Spotify → {_sp_song}")
+                            live_url    = _sp_art
+                            live_album  = _sp_album
+                            live_song   = _sp_song
+                            live_artist = _sp_artist
+                            if _sp_art and _sp_art != prev_live_url:
+                                print(f"[LS] Now Playing: Spotify → {_sp_song}")
                         else:
-                            # Both Lanyard and Spotify confirm not playing → override stale Last.FM.
                             now_playing = "Last Played"
                             print("[LS] Now Playing → Last Played (Lanyard + Spotify inactive)")
-                    # else: no Spotify credentials to verify.
-                    # User may be playing non-Spotify music (YouTube, SoundCloud, etc.).
-                    # Lanyard is used for art only — keep Last.FM's status.
-
-            elif now_playing == "Now Playing" and not _lanyard_available and _spotify_user_available:
+            elif now_playing == "Now Playing" and _spotify_user_available:
                 _is_playing, _sp_song, _sp_artist, _sp_album, _sp_art = \
                     _get_spotify_currently_playing(
                         SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN
                     )
-                spotify_fetched = True
                 if _is_playing and _sp_song:
                     now_playing = "Now Playing"
-                    if cached_lanyard_song is None:
-                        cached_lanyard_url    = _sp_art
-                        cached_lanyard_album  = _sp_album
-                        cached_lanyard_song   = _sp_song
-                        cached_lanyard_artist = _sp_artist
-                    if _sp_art: print(f"[LS] Now Playing: Spotify → {_sp_song}")
+                    live_url    = _sp_art
+                    live_album  = _sp_album
+                    live_song   = _sp_song
+                    live_artist = _sp_artist
+                    if _sp_art and _sp_art != prev_live_url:
+                        print(f"[LS] Now Playing: Spotify → {_sp_song}")
                 else:
                     now_playing = "Last Played"
                     print("[LS] Now Playing → Last Played (Spotify inactive)")
 
-            # ── Priority 0 — Spotify recently-played ──────────────────────────────
+            prev_live_url = live_url
+
+            # ── Priority 3 — Spotify recently-played (Last Played direct cover art) ──
+            # Queried once per Last Played track and ONLY accepted when the track title
+            # matches stats.fm (prevents stale song mismatch).
             if (now_playing == "Last Played"
-                    and cached_lanyard_song is None
+                    and live_song is None
                     and _spotify_user_available
                     and not _spotify_lp_fetched):
                 _sp_song, _sp_artist, _sp_album, _sp_art = _get_spotify_recent(
                     SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN
                 )
                 _spotify_lp_fetched = True
-                if _sp_song:
-                    cached_lanyard_url    = _sp_art
-                    cached_lanyard_album  = _sp_album
-                    cached_lanyard_song   = _sp_song
-                    cached_lanyard_artist = _sp_artist
+                if _sp_song and _sf_norm(_sp_song) == _sf_norm(np_track):
+                    cached_lp_url    = _sp_art
+                    cached_lp_album  = _sp_album
+                    cached_lp_song   = _sp_song
+                    cached_lp_artist = _sp_artist
                     print(f"[LS] Last Played: Spotify recently-played → {_sp_song} — {_sp_artist}")
+                elif _sp_song and DEBUG:
+                    print(f"[LS] Spotify recently-played mismatch ('{_sp_song}' != '{np_track}'), skipped")
 
-            banner_url = cached_lanyard_url
+            # Active override: live playback (Lanyard/Spotify) takes precedence over cached LP
+            cached_lanyard_url    = live_url    if live_song else cached_lp_url
+            cached_lanyard_album  = live_album  if live_song else cached_lp_album
+            cached_lanyard_song   = live_song   if live_song else cached_lp_song
+            cached_lanyard_artist = live_artist if live_song else cached_lp_artist
 
-            # ── Priority 3 — Spotify search ─────────────────────────────────────────
-            # Art-only fallback when no art from Lanyard/currently-playing/recently-played.
-            # Uses Client Credentials (no user OAuth needed).
-            if banner_url is None and not search_fetched and _spotify_available:
+            # Resolve effective track/artist for consistent display, bannermini, and npcount
+            display_track            = cached_lanyard_song   or np_track
+            display_artist           = cached_lanyard_artist or np_artist
+            effective_primary_artist = (
+                cached_lanyard_artist.split(",")[0].strip()
+                if cached_lanyard_artist else primary_artist
+            )
+            print(f"[LS] Status: {now_playing} | {display_track} — {display_artist}")
+
+            # ── Priority 4 — Spotify search (direct Spotify cover art fallback) ──────
+            search_key = (display_track, display_artist)
+            if search_key != prev_search_key:
+                search_fetched     = False
+                cached_spotify_url = None
+                prev_search_key    = search_key
+
+            if cached_lanyard_url is None and not search_fetched and _spotify_available:
                 _art = _get_spotify_art(
-                    cached_lanyard_song or np_track,
-                    cached_lanyard_artist or np_artist,
+                    display_track,
+                    display_artist,
                     SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
                 )
                 cached_spotify_url = _art
                 search_fetched     = True
                 if _art:
                     print("[LS] bannerwidgettop: Spotify search")
-            if banner_url is None:
-                banner_url = cached_spotify_url
 
-            # ── Priority 4 — Last.FM ──────────────────────────────────────────────────
-            if banner_url is None and lastfm_banner_url:
-                banner_url = lastfm_banner_url
-                if DEBUG: print("[LS] bannerwidgettop: Last.FM")
+            # Direct cover art strictly from Lanyard or Spotify (NEVER stats.fm)
+            direct_cover_art = cached_lanyard_url or cached_spotify_url
+
+            # Resolve bannerwidgettop URL: Lanyard/Spotify direct → stats.fm last-resort fallback
+            banner_url = direct_cover_art
+            if banner_url is None and statsfm_banner_url:
+                if _sf_norm(display_track) == _sf_norm(np_track):
+                    banner_url = statsfm_banner_url
+                    if DEBUG: print("[LS] bannerwidgettop: stats.fm (fallback)")
             # ──────────────────────────────────────────────────────────────────────────
 
             # --- bannerwidgettop: resolve final URL ---
-            # imgfixer ON  → download raw Last.FM URL, process with Pillow,
-            #                 re-host on Discord CDN via webhook.
-            # imgfixer OFF → proxy raw Last.FM URL through wsrv.nl so Discord's
-            #                 widget renderer can access it (some Fastly CDN
-            #                 routes are inaccessible from Discord's servers).
             fixed_banner_url = banner_url
             if banner_url:
                 if IMGFIXER_ENABLED and _imgfixer_available and DISCORD_IMAGE_WEBHOOK_URL:
@@ -960,88 +862,92 @@ def run_listening_stats() -> None:
                         reupload_interval=IMGFIXER_REUPLOAD_INTERVAL,
                     )
                 elif any(h in banner_url for h in ("lastfm", "last.fm")):
-                    # Last.FM CDN (Fastly) is sometimes unreachable from Discord's
-                    # servers — proxy through wsrv.nl to ensure reliable delivery.
                     clean_url        = banner_url.replace("https://", "")
                     fixed_banner_url = f"https://wsrv.nl/?url={clean_url}&output=jpg&q=85"
-                # else: Spotify CDN (i.scdn.co), Discord CDN, etc.
-                # — serve directly, no proxy needed.
 
             # --- Artist image (bannermini) ---
+            # When the artist has no image in cache/gallery, fall back to the song's
+            # cover art from Lanyard or Spotify directly (never stats.fm).
             if ARTIST_IMAGE_ENABLED:
-                # Detect artist change by MBID when available, or by name for artists without one
-                artist_changed = (mbid != prev_mbid) or (not mbid and np_artist != prev_npartist)
+                artist_changed = (effective_primary_artist != prev_npartist)
+                mini_fallback  = direct_cover_art or AUDIODB_FALLBACK_URL
                 if artist_changed:
-                    cached_pool     = get_pool_cached(np_artist, mbid=mbid, label="LS")
-                    prev_mbid       = mbid
-                    prev_npartist   = np_artist
-                    banner_mini_url = random.choice(cached_pool) if cached_pool else AUDIODB_FALLBACK_URL
-                    print(f"[LS] New artist: {np_artist}")
+                    cached_pool   = get_pool_cached(effective_primary_artist, label="LS")
+                    prev_npartist = effective_primary_artist
+                    if cached_pool:
+                        banner_mini_url = random.choice(cached_pool)
+                    else:
+                        banner_mini_url = mini_fallback
+                        if direct_cover_art:
+                            print("[LS] bannermini: no artist image → using Lanyard/Spotify cover art")
+                    print(f"[LS] New artist: {effective_primary_artist}")
                     print(f"[LS] bannermini: {banner_mini_url}")
-                    # Pre-warm wsrv.nl cache in background: ensures Discord
-                    # gets a fast cached response when the widget renders.
                     if banner_mini_url:
                         threading.Thread(
                             target=_warm_url, args=(banner_mini_url,), daemon=True
                         ).start()
-                elif np_track != prev_nptrack:
+                elif display_track != prev_nptrack:
                     if cached_pool:
-                        # Exclude the currently shown image so it always refreshes on track change.
-                        # Discord silently ignores a PATCH when the bannermini URL is identical
-                        # to the one already displayed — making it look like the image is stuck.
                         alt_pool = [u for u in cached_pool if u != banner_mini_url]
                         banner_mini_url = random.choice(alt_pool if alt_pool else cached_pool)
+                    else:
+                        banner_mini_url = mini_fallback
+                        if direct_cover_art:
+                            print("[LS] bannermini: no artist image → updated to Lanyard/Spotify cover art")
                     print(f"[LS] bannermini: {banner_mini_url}")
                     if banner_mini_url:
                         threading.Thread(
                             target=_warm_url, args=(banner_mini_url,), daemon=True
                         ).start()
-                prev_nptrack = np_track
+                elif not cached_pool and mini_fallback != banner_mini_url:
+                    banner_mini_url = mini_fallback
+                    print(f"[LS] bannermini: cover art synced → {banner_mini_url}")
+                    if banner_mini_url:
+                        threading.Thread(
+                            target=_warm_url, args=(banner_mini_url,), daemon=True
+                        ).start()
+                prev_nptrack = display_track
             else:
                 banner_mini_url = AUDIODB_FALLBACK_URL
 
-            # --- npcount: per-track play count + album title ---
-            # Only calls track.getInfo when the playing track changes; cached
-            # for all subsequent polls of the same track.
-            npcount_key = (np_track, np_artist)
+            # --- npcount: per-track play count + album title (stats.fm v2 API) ---
+            npcount_key = (display_track, display_artist)
             if npcount_key != prev_npcount_key:
-                count, getinfo_album = getTrackInfo(np_artist, np_track, track_mbid=np_track_mbid)
-                scrobble_album       = _EXPLICIT_RE.sub("", np_album).strip() if np_album else ""
+                same_as_sf = (_sf_norm(display_track) == _sf_norm(np_track))
+                count = getTrackPlayCount(
+                    effective_primary_artist,
+                    display_track,
+                    track_id=(sf_track_id if same_as_sf else None),
+                    spotify_track_id=(sp_track_id if same_as_sf else None),
+                )
+                scrobble_album = (
+                    _EXPLICIT_RE.sub("", np_album).strip()
+                    if (np_album and same_as_sf) else ""
+                )
                 if DEBUG: print(
                     f"[LS] npcount raw → count={count}"
                     f" | lanyard='{cached_lanyard_album}'"
-                    f" | scrobble='{scrobble_album}'"
-                    f" | getInfo='{getinfo_album}'"
+                    f" | statsfm='{scrobble_album}'"
                 )
 
-                # Album priority: Lanyard (Spotify) → Last.FM scrobble → track.getInfo
-                # Lanyard.album is always accurate — directly from Spotify,
-                # never mislabeled as a single or given the wrong track title.
                 if cached_lanyard_album:
                     album_title = cached_lanyard_album
-                elif scrobble_album:
-                    album_title = scrobble_album
                 else:
-                    album_title = getinfo_album
+                    album_title = scrobble_album
 
-                # Pass the Lanyard song name (if available) to format_npcount
-                # so the 'album == track' check uses the same title we display.
-                display_track = cached_lanyard_song or np_track
                 cached_npcount   = format_npcount(count, album_title, display_track)
                 prev_npcount_key = npcount_key
                 print(f"[LS] npcount: {cached_npcount}")
 
-
             # Expose current artist info to the TA thread
             with _shared_lock:
-                _shared["artist_name"]    = np_artist
+                _shared["artist_name"]    = effective_primary_artist
                 _shared["artist_pool"]    = list(cached_pool)
                 _shared["bannermini_url"] = banner_mini_url
 
             # --- Push to Discord only when something has changed ---
             current_payload = (
-                now_playing, fixed_banner_url, np_track, np_artist, mbid, banner_mini_url,
-                cached_lanyard_song, cached_lanyard_artist,
+                now_playing, fixed_banner_url, display_track, display_artist, banner_mini_url,
                 stat1_val, stat2_val, stat3_val, stat4_val, stat5_val, stat6_val,
                 stat1_label, stat2_label, stat3_label, stat4_label, stat5_label, stat6_label,
                 lsmini, cached_npcount,
@@ -1062,10 +968,8 @@ def run_listening_stats() -> None:
                     dynamic.append({"type": 3, "name": "bannerwidgettop", "value": {"url": fixed_banner_url}})
                 dynamic += [
                     {"type": 1, "name": "nowplaying",  "value": now_playing},
-                    # Prefer Lanyard values (Spotify source) for song and artist;
-                    # fall back to Last.FM when Lanyard is not available.
-                    {"type": 1, "name": "nptrack",     "value": cached_lanyard_song   or np_track},
-                    {"type": 1, "name": "npartist",    "value": cached_lanyard_artist or np_artist},
+                    {"type": 1, "name": "nptrack",     "value": display_track},
+                    {"type": 1, "name": "npartist",    "value": display_artist},
                     {"type": 1, "name": "npcount",     "value": cached_npcount},
                     # Stat values (configurable via config.py LS_STAT*_TYPE / LS_STAT*_PERIOD)
                     {"type": 1, "name": "lsstat1",     "value": stat1_val},
@@ -1235,6 +1139,10 @@ if __name__ == "__main__":
         print("[TA] WARNING: TOPARTISTS_APPLICATION_ID or TOPARTISTS_BOT_TOKEN not set → Top Artists widget disabled")
         effective_ta = False
 
+    if effective_ls and not STATSFM_USERNAME:
+        print("[LS] WARNING: STATSFM_USERNAME not set → Listening Stats widget disabled")
+        effective_ls = False
+
     if effective_ls and not (LS_APPLICATION_ID and LS_BOT_TOKEN):
         print("[LS] WARNING: APPLICATION_ID or BOT_TOKEN not set → Listening Stats widget disabled")
         effective_ls = False
@@ -1245,9 +1153,10 @@ if __name__ == "__main__":
 
     # ── Startup banner ───────────────────────────────────────────────────────────
     ls_status = (
-        f"✓ fast={LS_FAST_INTERVAL}s / slow={LS_SLOW_INTERVAL}s"
+        f"✓ fast={LS_FAST_INTERVAL}s / slow={LS_SLOW_INTERVAL}s (stats.fm)"
         if effective_ls else
-        "✗ disabled"                      if not ENABLE_LISTENING_STATS else
+        "✗ disabled"                       if not ENABLE_LISTENING_STATS else
+        "✗ STATSFM_USERNAME not set"       if not STATSFM_USERNAME else
         "✗ APPLICATION credentials missing"
     )
     ta_status = (

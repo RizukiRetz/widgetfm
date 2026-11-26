@@ -4,10 +4,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Credentials (loaded from .env) ─────────────────────────────────────────────
-LAST_FM_USERNAME  = os.getenv("LAST_FM_USERNAME")
-API_KEY           = os.getenv("API_KEY")
+STATSFM_USERNAME  = os.getenv("STATSFM_USERNAME")  # primary stats & listening source (no API key needed)
 USER_ID           = os.getenv("USER_ID")           # your Discord user ID
-STATSFM_USERNAME  = os.getenv("STATSFM_USERNAME")
+
+# Legacy / optional Last.FM vars (no longer used for API calls since Last.FM
+# API keys require Last.FM Pro; kept only for backwards compatibility with old .env files)
+LAST_FM_USERNAME  = os.getenv("LAST_FM_USERNAME", "")
+API_KEY           = os.getenv("API_KEY", "")
 
 # ── Widget: Listening Stats ────────────────────────────────────────────────────
 LS_APPLICATION_ID = os.getenv("APPLICATION_ID")
@@ -21,8 +24,8 @@ TA_BOT_TOKEN      = os.getenv("TOPARTISTS_BOT_TOKEN")
 # True  = widget thread is started on launch
 # False = widget is skipped entirely
 #
-# Note: ENABLE_TOP_ARTISTS = True requires STATSFM_USERNAME in .env.
-# If left empty, Top Artists is auto-disabled with a warning at startup.
+# Note: Both widgets require STATSFM_USERNAME in .env.
+# If left empty, widgets are auto-disabled with a warning at startup.
 ENABLE_LISTENING_STATS = True
 ENABLE_TOP_ARTISTS     = True
 
@@ -93,24 +96,24 @@ NPCOUNT_SPLIT_LINES = False
 NPCOUNT_TOTAL_MAX_LEN = 34
 
 # ── Intervals (seconds) ──────────────────────────────────────────────────────────────
-LS_FAST_INTERVAL = 20   # how often to poll Last.FM for recent tracks
-LS_SLOW_INTERVAL = 60   # how often to refresh user info & top stats
+LS_FAST_INTERVAL = 20   # how often to poll stats.fm / Lanyard for current/recent tracks
+LS_SLOW_INTERVAL = 60   # how often to refresh user stats & top stats
 
 # ── Listening Stats — Configurable Stat Slots ─────────────────────────────────────────
 # Each slot displays the data configured here. Labels are auto-generated
 # by the script and pushed to Discord as fields lslabel1..lslabel6.
 # lsmini combines value + label into a single string (label is off in Discord editor).
 #
-# TYPE options:
-#   "scrobbles"       → Total scrobbles     (Last.FM, period ignored)
-#   "totalalbums"     → Total unique albums  (Last.FM, period ignored)
-#   "totalartists"    → Total unique artists (Last.FM, period ignored)
-#   "totaltracks"     → Total unique tracks  (Last.FM, period ignored)
-#   "topartist"       → Top Artist #1        (Last.FM, period used)
-#   "toptrack"        → Top Song #1          (Last.FM, period used)
-#   "topalbum"        → Top Album #1         (Last.FM, period used)
-#   "hoursstreamed"   → Hours Listened       (stats.fm, requires STATSFM_USERNAME)
-#   "minutesstreamed" → Minutes Listened     (stats.fm, requires STATSFM_USERNAME)
+# TYPE options (all powered by stats.fm v2 API — requires STATSFM_USERNAME):
+#   "scrobbles"       → Total streams/scrobbles (lifetime, period ignored)
+#   "totalalbums"     → Total unique albums     (lifetime, period ignored)
+#   "totalartists"    → Total unique artists    (lifetime, period ignored)
+#   "totaltracks"     → Total unique tracks     (lifetime, period ignored)
+#   "hoursstreamed"   → Hours Listened          (lifetime, period ignored)
+#   "minutesstreamed" → Minutes Listened        (lifetime, period ignored)
+#   "topartist"       → Top Artist #1           (period used)
+#   "toptrack"        → Top Song #1             (period used)
+#   "topalbum"        → Top Album #1            (period used)
 #
 # PERIOD options (only applies to topartist / toptrack / topalbum):
 #   "overall" | "7day" | "1month" | "3month" | "6month" | "12month"
@@ -191,5 +194,9 @@ BLACKLISTED_HASHES: set[str] = {
      "1b484577562c41de80266987ec06efb7",  # wrong photo on Kyra Fields page
 }
 
-# ── HTTP headers ──────────────────────────────────────────────────────────────
-STATSFM_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+# ── stats.fm API v2 ───────────────────────────────────────────────────────────
+STATSFM_API_BASE = "https://api-v2.stats.fm/api/v1"
+STATSFM_HEADERS  = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept":     "application/json",
+}

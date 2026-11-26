@@ -1,6 +1,6 @@
 # WidgetFM
 
-Real-time Discord profile widget that displays your Last.FM listening stats and top artists — with album art sourced from Lanyard, Spotify, and Last.FM.
+Real-time Discord profile widget that displays your **stats.fm** listening stats and top artists — with album art sourced from Lanyard, Spotify, and stats.fm (no Last.FM API key required).
 
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![License](https://img.shields.io/badge/license-GPL--3.0-green)
@@ -27,7 +27,7 @@ Real-time Discord profile widget that displays your Last.FM listening stats and 
 
 - **Listening Stats widget** — Now Playing / Last Played track, scrobble count, play count subtitle, and six fully configurable stat slots (scrobbles, top artists/tracks/albums, hours/minutes listened, etc.)
 - **Top Artists widget** — Your top 5 artists across three time ranges (All Time / 6 Months / 30 Days), rotating every 25 seconds
-- **Three-source album art priority chain** — Lanyard (Discord Rich Presence, 640×640) → Spotify API → Last.FM (automatic fallback per track)
+- **Three-source album art priority chain** — Lanyard (Discord Rich Presence, 640×640) → stats.fm API v2 → Spotify API (automatic fallback per track)
 - **Dynamic artist images** — Scraped from Last.FM's photo gallery, with AudioDB as a fallback; served through [wsrv.nl](https://wsrv.nl) for consistent sizing
 - **Smart image caching** — Locally built cache is bundled into the Docker image so the server never needs to scrape Last.FM directly
 - **Configurable stat slots** — All six stat display slots are configurable from `config.py` without touching any other code
@@ -39,10 +39,9 @@ Real-time Discord profile widget that displays your Last.FM listening stats and 
 
 - Python 3.11 or later (download from [python.org](https://www.python.org/downloads/))
 - Git (download from [git-scm.com](https://git-scm.com/downloads))
-- A [Last.FM](https://www.last.fm) account with API access
+- A [stats.fm](https://stats.fm) account with public stats/streams (no API key required)
 - Two Discord Applications (one per widget)
-- *(Optional)* A [Spotify](https://developer.spotify.com/dashboard) app — for album art fallback when Last.FM has no artwork
-- *(Optional)* A [stats.fm](https://stats.fm) account — required only for the Top Artists widget and `hoursstreamed` / `minutesstreamed` stat slots
+- *(Optional)* A [Spotify](https://developer.spotify.com/dashboard) app — for currently-playing verification and album art fallback
 - *(Optional)* A [Fly.io](https://fly.io) account for 24/7 hosting
 
 ---
@@ -242,16 +241,14 @@ Copy `.env.example` to `.env` and fill in your credentials:
 
 | Variable | Required | Where to find it |
 |---|---|---|
-| `LAST_FM_USERNAME` | ✅ | Your Last.FM username |
-| `API_KEY` | ✅ | [last.fm/api/account/create](https://www.last.fm/api/account/create) |
+| `STATSFM_USERNAME` | ✅ | Your [stats.fm](https://stats.fm) username (ensure stats & streams are public) |
 | `USER_ID` | ✅ | Discord → Settings → Advanced → Developer Mode → right-click your profile |
 | `APPLICATION_ID` | ✅ | Discord Developer Portal → Application #1 → General Information |
 | `BOT_TOKEN` | ✅ | Discord Developer Portal → Application #1 → Bot → Reset Token |
 | `TOPARTISTS_APPLICATION_ID` | ✅ | Discord Developer Portal → Application #2 → General Information |
 | `TOPARTISTS_BOT_TOKEN` | ✅ | Discord Developer Portal → Application #2 → Bot → Reset Token |
-| `STATSFM_USERNAME` | ⚪ Optional | Required for Top Artists widget and `hoursstreamed`/`minutesstreamed` stat slots |
 | `DISCORD_IMAGE_WEBHOOK_URL` | ⚪ Optional | Required when `IMGFIXER_ENABLED = True` in `config.py` |
-| `SPOTIFY_CLIENT_ID` | ⚪ Optional | [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) — album art fallback |
+| `SPOTIFY_CLIENT_ID` | ⚪ Optional | [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) — currently-playing / art fallback |
 | `SPOTIFY_CLIENT_SECRET` | ⚪ Optional | Same app as above |
 | `SPOTIFY_REFRESH_TOKEN` | ⚪ Optional | Run `python spotify_auth.py` once after setting the two above |
 

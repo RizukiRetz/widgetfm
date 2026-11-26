@@ -58,8 +58,7 @@ Secrets are encrypted at rest and are never visible after being set.
 
 ```powershell
 flyctl secrets set `
-  LAST_FM_USERNAME="your_lastfm_username" `
-  API_KEY="your_lastfm_api_key" `
+  STATSFM_USERNAME="your_statsfm_username" `
   USER_ID="your_discord_user_id" `
   APPLICATION_ID="ls_application_id" `
   BOT_TOKEN="ls_bot_token" `
@@ -70,10 +69,7 @@ flyctl secrets set `
 **Optional secrets** — add only if you use these features:
 
 ```powershell
-# stats.fm — required for Top Artists widget and hoursstreamed/minutesstreamed slots
-flyctl secrets set STATSFM_USERNAME="your_statsfm_username"
-
-# Spotify — album art fallback (run spotify_auth.py locally first)
+# Spotify — album art / currently-playing fallback (run spotify_auth.py locally first)
 flyctl secrets set `
   SPOTIFY_CLIENT_ID="your_spotify_client_id" `
   SPOTIFY_CLIENT_SECRET="your_spotify_client_secret" `
