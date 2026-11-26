@@ -13624,7 +13624,7 @@
   },
   "Chezka": {
     "urls": [],
-    "fetched_at": 1795229339.6895378
+    "fetched_at": 1795673953.2052581
   },
   "daine": {
     "urls": [],
@@ -13697,7 +13697,7 @@
   },
   "Dani Stocksdale": {
     "urls": [],
-    "fetched_at": 1795500645.8836858
+    "fetched_at": 1795672324.0487523
   },
   "Anna Duboc": {
     "urls": [],
@@ -13988,7 +13988,7 @@
   },
   "colby!": {
     "urls": [],
-    "fetched_at": 1795498888.5897589
+    "fetched_at": 1795669417.7335663
   },
   "El Michels Affair": {
     "urls": [
@@ -14007,5 +14007,29 @@
   "Emyrson Flora": {
     "urls": [],
     "fetched_at": 1795578217.3996434
+  },
+  "sicknote": {
+    "urls": [
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/3ddb8cdf8a49822aa8f02826ee81ca1a&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/572617d329c5338aef97443b2a88432e&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/fa2fc8ed95614a6fb8a903141f5145ff&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/d2502eeb561a41e19833fc6a9e149801&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/5d3116bf8ba04d6aa4ab0eeeaba1e087&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/8ee9121493054a6dbb51f990b1b9f768&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/b40068d279634f9ca70688a6b2842036&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/c7bd8cef9b534bcebf18b427b34f2ed2&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/138b113ca39145f2ac0e2926256efe49&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/a56d21ba6f0c4d3faf9b0a523042ffdb&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/d03bd32b55704fa49bcd4765389afcb0&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/e15bc088f1fb49d39d54052ee6385392&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/d97b8a569c2f44799585dda4ae044e79&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/bfbb7acbafa14417af9b9e8ed24b64aa&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/4b2e520f22fe4cffad3675c9e7e38574&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/c11bbde2cf194257bb8326b578958b9e&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/544da853011d46b6918101b82b613646&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/087939fcc247409aa10a9508cc0809f4&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80",
+      "https://wsrv.nl/?url=lastfm-img.freetls.fastly.net/i/u/770x0/f170bf30f854a2e1b46afce7445d01b0&w=300&h=300&fit=cover&a=entropy&output=jpg&q=80"
+    ],
+    "fetched_at": 1795673810.8126335
   }
 }

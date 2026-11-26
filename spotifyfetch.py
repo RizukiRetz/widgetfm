@@ -196,36 +196,19 @@ def get_queue_album_art(np_track: str, np_artist: str,
         return None
 
 
-def get_currently_playing_data(
+def get_currently_playing_with_id(
     client_id: str, client_secret: str, refresh_token: str
-) -> tuple[bool, str | None, str | None, str | None, str | None]:
-    """Fetch full playback state from /v1/me/player/currently-playing.
+) -> tuple[bool, str | None, str | None, str | None, str | None, str | None]:
+    """Fetch full playback state + Spotify track ID from /v1/me/player/currently-playing.
 
-    Unlike get_queue_album_art, this function:
-      • Returns is_playing so callers can detect paused/stopped state.
-      • Returns full track metadata (song, artist, album) — not just art URL.
-      • Does NOT filter by track name — returns whatever Spotify is playing.
-
-    Response fields used:
-      is_playing          → True only when actively playing (not paused).
-      item.name           → song title.
-      item.artists[].name → artists (joined with ', ').
-      item.album.name     → album name.
-      item.album.images   → art URL (largest by pixel area).
-
-    Returns (is_playing, song, artist, album, art_url).
-    Returns (False, None, None, None, None) when:
-      - Nothing playing / paused (is_playing=false)
-      - 204 No Content (no active device)
-      - Playing a non-track (ad, podcast episode)
-      - Any network or token error
+    Returns (is_playing, song, artist, album, art_url, track_id).
     """
     if not refresh_token or not client_id or not client_secret:
-        return False, None, None, None, None
+        return False, None, None, None, None, None
 
     token = _get_user_token(refresh_token, client_id, client_secret)
     if not token:
-        return False, None, None, None, None
+        return False, None, None, None, None, None
 
     def _fetch(tok: str):
         return requests.get(
@@ -242,35 +225,46 @@ def get_currently_playing_data(
             _user_cache["expires_at"]   = 0.0
             token = _get_user_token(refresh_token, client_id, client_secret)
             if not token:
-                return False, None, None, None, None
+                return False, None, None, None, None, None
             r = _fetch(token)
 
         if r.status_code == 204:
-            return False, None, None, None, None   # no active device / nothing playing
+            return False, None, None, None, None, None
 
         if r.status_code != 200:
             print(f"[Spotify] currently-playing HTTP {r.status_code}")
-            return False, None, None, None, None
+            return False, None, None, None, None, None
 
         data       = r.json()
-        is_playing = data.get("is_playing", False)  # False = paused
+        is_playing = data.get("is_playing", False)
 
         item = data.get("item")
         if not item:
-            return False, None, None, None, None   # ad or podcast episode
+            return False, None, None, None, None, None
 
-        song   = item.get("name", "").strip() or None
-        artist = ", ".join(
+        song     = item.get("name", "").strip() or None
+        artist   = ", ".join(
             a["name"] for a in item.get("artists", []) if a.get("name")
         ) or None
-        album  = item.get("album", {}).get("name", "").strip() or None
-        art    = _best_image(item.get("album", {}).get("images", []))
+        album    = item.get("album", {}).get("name", "").strip() or None
+        art      = _best_image(item.get("album", {}).get("images", []))
+        track_id = (item.get("id") or "").strip() or None
 
-        return is_playing, song, artist, album, art
+        return is_playing, song, artist, album, art, track_id
 
     except Exception as exc:
         print(f"[Spotify] currently-playing error: {exc}")
-        return False, None, None, None, None
+        return False, None, None, None, None, None
+
+
+def get_currently_playing_data(
+    client_id: str, client_secret: str, refresh_token: str
+) -> tuple[bool, str | None, str | None, str | None, str | None]:
+    """Backwards-compatible 5-tuple wrapper around get_currently_playing_with_id()."""
+    is_playing, song, artist, album, art, _ = get_currently_playing_with_id(
+        client_id, client_secret, refresh_token
+    )
+    return is_playing, song, artist, album, art
 
 
 
@@ -334,30 +328,19 @@ def get_spotify_album_art(track: str, artist: str,
 # Strategy 3 — Recently Played API (user OAuth, Last Played only)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_recently_played(
+def get_recently_played_with_id(
     client_id: str, client_secret: str, refresh_token: str
-) -> tuple[str | None, str | None, str | None, str | None]:
-    """Fetch the most recently played track from /v1/me/player/recently-played.
+) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    """Fetch the most recently played track + Spotify ID from /v1/me/player/recently-played.
 
-    Requires user OAuth (refresh_token).  Used as the primary data source for
-    'Last Played' status — provides song, artist, album, and album art directly
-    from Spotify (always correct, no Last.FM indexing delay).
-
-    Response path:
-      items[0].track.name            → song
-      items[0].track.artists[].name  → artists (joined with ', ')
-      items[0].track.album.name      → album
-      items[0].track.album.images[]  → art (largest picked by _best_image)
-
-    Returns (song, artist, album, art_url).
-    All values are None on any error or if the history is empty.
+    Returns (song, artist, album, art_url, track_id).
     """
     if not refresh_token or not client_id or not client_secret:
-        return None, None, None, None
+        return None, None, None, None, None
 
     token = _get_user_token(refresh_token, client_id, client_secret)
     if not token:
-        return None, None, None, None
+        return None, None, None, None, None
 
     def _fetch(tok: str):
         return requests.get(
@@ -375,32 +358,43 @@ def get_recently_played(
             _user_cache["expires_at"]   = 0.0
             token = _get_user_token(refresh_token, client_id, client_secret)
             if not token:
-                return None, None, None, None
+                return None, None, None, None, None
             r = _fetch(token)
 
         if r.status_code != 200:
             print(f"[Spotify] recently-played HTTP {r.status_code}")
-            return None, None, None, None
+            return None, None, None, None, None
 
         data  = r.json()
         items = data.get("items", [])
         if not items:
-            return None, None, None, None
+            return None, None, None, None, None
 
         track = items[0].get("track") or {}
         if not track:
-            return None, None, None, None
+            return None, None, None, None, None
 
-        song   = track.get("name", "").strip() or None
-        artist = ", ".join(
+        song     = track.get("name", "").strip() or None
+        artist   = ", ".join(
             a["name"] for a in track.get("artists", []) if a.get("name")
         ) or None
-        album  = track.get("album", {}).get("name", "").strip() or None
-        art    = _best_image(track.get("album", {}).get("images", []))
+        album    = track.get("album", {}).get("name", "").strip() or None
+        art      = _best_image(track.get("album", {}).get("images", []))
+        track_id = (track.get("id") or "").strip() or None
 
-        return song, artist, album, art
+        return song, artist, album, art, track_id
 
     except Exception as exc:
         print(f"[Spotify] recently-played error: {exc}")
-        return None, None, None, None
+        return None, None, None, None, None
+
+
+def get_recently_played(
+    client_id: str, client_secret: str, refresh_token: str
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Backwards-compatible 4-tuple wrapper around get_recently_played_with_id()."""
+    song, artist, album, art, _ = get_recently_played_with_id(
+        client_id, client_secret, refresh_token
+    )
+    return song, artist, album, art
 

@@ -30,9 +30,9 @@ _spotify_user_available = False   # User OAuth currently-playing (Strategy 1)
 if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
     try:
         from spotifyfetch import (
-            get_currently_playing_data as _get_spotify_currently_playing,
-            get_spotify_album_art      as _get_spotify_art,
-            get_recently_played        as _get_spotify_recent,
+            get_currently_playing_with_id as _get_spotify_currently_playing,
+            get_spotify_album_art         as _get_spotify_art,
+            get_recently_played_with_id   as _get_spotify_recent,
         )
         _spotify_available = True
         if SPOTIFY_REFRESH_TOKEN:
@@ -51,7 +51,7 @@ if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
 _lanyard_available = False
 if USER_ID:
     try:
-        from lanyardfetch import get_lanyard_album_art as _get_lanyard_art
+        from lanyardfetch import get_lanyard_presence as _get_lanyard_art
         _lanyard_available = True
         print("[Lanyard] Presence enabled — song, artist, album, and art (priority 1)")
     except ImportError:
@@ -474,7 +474,7 @@ def getRecentStream() -> tuple:
 
     Returns:
       (now_playing, banner_url, np_track, np_artist, primary_artist,
-       np_album, statsfm_track_id, spotify_track_id, artist_image)
+       np_album, statsfm_track_id, spotify_track_id, spotify_ids, artist_image)
     """
     now_playing, info = _sf_get_recent_stream(
         STATSFM_USERNAME,
@@ -490,6 +490,7 @@ def getRecentStream() -> tuple:
         info["album"],
         info["track_id"],
         info["spotify_id"],
+        info["spotify_ids"],
         info["artist_image"],
     )
 
@@ -649,6 +650,7 @@ def run_listening_stats() -> None:
     banner_mini_url         = None
     prev_npcount_key:  tuple = ()    # (display_track, display_artist) — re-fetch on change
     cached_npcount:    str   = ""    # last formatted npcount string
+    cached_npcount_val: int  = -1    # last numeric play count (-1 = unfetched)
 
     # ─ Art / live-playback priority chain state ─────────────────────────────
     prev_art_key:         tuple      = ()
@@ -658,6 +660,7 @@ def run_listening_stats() -> None:
     cached_lp_album:      str | None = None
     cached_lp_song:       str | None = None
     cached_lp_artist:     str | None = None
+    cached_lp_sp_id:      str | None = None
     prev_search_key:      tuple      = ()    # (display_track, display_artist) for Spotify search
     search_fetched:       bool       = False # True = tried Spotify search for current display track
     cached_spotify_url:   str | None = None
@@ -715,21 +718,23 @@ def run_listening_stats() -> None:
 
             # --- Fast data: every LS_FAST_INTERVAL seconds (stats.fm v2 API) ---
             (now_playing, statsfm_banner_url, np_track, np_artist,
-             primary_artist, np_album, sf_track_id, sp_track_id, sf_artist_img) = getRecentStream()
+             primary_artist, np_album, sf_track_id, sp_track_id,
+             sf_spotify_ids, sf_artist_img) = getRecentStream()
 
             # ─── Now Playing verification + Art priority chain ──────────────────────────────
             # Priority 1: Lanyard  — real-time Discord presence, no auth, free (checked every poll).
             # Priority 2: Spotify  — currently-playing API (verifies active playback).
-            # Priority 3: Spotify  — recently-played (Last Played, only if title matches stats.fm).
+            # Priority 3: Spotify  — recently-played (Last Played, matched by Spotify ID or title).
             # Priority 4: Spotify  — search (art fallback, Client Credentials only).
             # Priority 5: stats.fm — final art fallback for bannerwidgettop ONLY (never for bannermini).
-            art_key = (np_track, np_artist)
+            art_key = (sf_track_id or np_track, np_artist)
             if art_key != prev_art_key:
                 _spotify_lp_fetched = False
                 cached_lp_url       = None
                 cached_lp_album     = None
                 cached_lp_song      = None
                 cached_lp_artist    = None
+                cached_lp_sp_id     = None
                 prev_art_key        = art_key
                 if DEBUG: print(f"[LS] Art cache cleared: {np_track}")
 
@@ -737,10 +742,11 @@ def run_listening_stats() -> None:
             live_album:  str | None = None
             live_song:   str | None = None
             live_artist: str | None = None
+            live_sp_id:  str | None = None
 
             # ── Priority 1 — Lanyard (real-time Discord presence) ────────────────────
             if _lanyard_available:
-                _art, _lanyard_album, _lanyard_song, _lanyard_artist = _get_lanyard_art(USER_ID)
+                _art, _lanyard_album, _lanyard_song, _lanyard_artist, _lanyard_sp_id = _get_lanyard_art(USER_ID)
                 if _lanyard_song:
                     # Lanyard confirms: user IS actively streaming Spotify via Discord.
                     now_playing = "Now Playing"
@@ -748,13 +754,14 @@ def run_listening_stats() -> None:
                     live_album  = _lanyard_album
                     live_song   = _lanyard_song
                     live_artist = _lanyard_artist
+                    live_sp_id  = _lanyard_sp_id
                     if _art and _art != prev_live_url:
                         print("[LS] bannerwidgettop: Lanyard")
                 elif now_playing == "Now Playing":
                     # stats.fm says Now Playing but Lanyard says not playing.
                     # Verify with Spotify currently-playing before accepting the override.
                     if _spotify_user_available:
-                        _is_playing, _sp_song, _sp_artist, _sp_album, _sp_art = \
+                        _is_playing, _sp_song, _sp_artist, _sp_album, _sp_art, _sp_id = \
                             _get_spotify_currently_playing(
                                 SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN
                             )
@@ -764,13 +771,14 @@ def run_listening_stats() -> None:
                             live_album  = _sp_album
                             live_song   = _sp_song
                             live_artist = _sp_artist
+                            live_sp_id  = _sp_id
                             if _sp_art and _sp_art != prev_live_url:
                                 print(f"[LS] Now Playing: Spotify → {_sp_song}")
                         else:
                             now_playing = "Last Played"
                             print("[LS] Now Playing → Last Played (Lanyard + Spotify inactive)")
             elif now_playing == "Now Playing" and _spotify_user_available:
-                _is_playing, _sp_song, _sp_artist, _sp_album, _sp_art = \
+                _is_playing, _sp_song, _sp_artist, _sp_album, _sp_art, _sp_id = \
                     _get_spotify_currently_playing(
                         SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN
                     )
@@ -780,6 +788,7 @@ def run_listening_stats() -> None:
                     live_album  = _sp_album
                     live_song   = _sp_song
                     live_artist = _sp_artist
+                    live_sp_id  = _sp_id
                     if _sp_art and _sp_art != prev_live_url:
                         print(f"[LS] Now Playing: Spotify → {_sp_song}")
                 else:
@@ -789,21 +798,27 @@ def run_listening_stats() -> None:
             prev_live_url = live_url
 
             # ── Priority 3 — Spotify recently-played (Last Played direct cover art) ──
-            # Queried once per Last Played track and ONLY accepted when the track title
-            # matches stats.fm (prevents stale song mismatch).
+            # Queried once per Last Played track and accepted when Spotify Track ID
+            # matches stats.fm (fixes placeholder titles like 'Track 2' / 'Unknown' artist)
+            # OR when the normalized track title matches.
             if (now_playing == "Last Played"
                     and live_song is None
                     and _spotify_user_available
                     and not _spotify_lp_fetched):
-                _sp_song, _sp_artist, _sp_album, _sp_art = _get_spotify_recent(
+                _sp_song, _sp_artist, _sp_album, _sp_art, _sp_id = _get_spotify_recent(
                     SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REFRESH_TOKEN
                 )
                 _spotify_lp_fetched = True
-                if _sp_song and _sf_norm(_sp_song) == _sf_norm(np_track):
+                _lp_matches = bool(
+                    (_sp_id and _sp_id in sf_spotify_ids)
+                    or (_sp_song and _sf_norm(_sp_song) == _sf_norm(np_track))
+                )
+                if _sp_song and _lp_matches:
                     cached_lp_url    = _sp_art
                     cached_lp_album  = _sp_album
                     cached_lp_song   = _sp_song
                     cached_lp_artist = _sp_artist
+                    cached_lp_sp_id  = _sp_id
                     print(f"[LS] Last Played: Spotify recently-played → {_sp_song} — {_sp_artist}")
                 elif _sp_song and DEBUG:
                     print(f"[LS] Spotify recently-played mismatch ('{_sp_song}' != '{np_track}'), skipped")
@@ -813,6 +828,7 @@ def run_listening_stats() -> None:
             cached_lanyard_album  = live_album  if live_song else cached_lp_album
             cached_lanyard_song   = live_song   if live_song else cached_lp_song
             cached_lanyard_artist = live_artist if live_song else cached_lp_artist
+            effective_sp_id       = live_sp_id  if live_song else (cached_lp_sp_id or sp_track_id)
 
             # Resolve effective track/artist for consistent display, bannermini, and npcount
             display_track            = cached_lanyard_song   or np_track
@@ -820,6 +836,10 @@ def run_listening_stats() -> None:
             effective_primary_artist = (
                 cached_lanyard_artist.split(",")[0].strip()
                 if cached_lanyard_artist else primary_artist
+            )
+            same_as_sf = bool(
+                (effective_sp_id and effective_sp_id in sf_spotify_ids)
+                or (_sf_norm(display_track) == _sf_norm(np_track))
             )
             print(f"[LS] Status: {now_playing} | {display_track} — {display_artist}")
 
@@ -846,10 +866,9 @@ def run_listening_stats() -> None:
 
             # Resolve bannerwidgettop URL: Lanyard/Spotify direct → stats.fm last-resort fallback
             banner_url = direct_cover_art
-            if banner_url is None and statsfm_banner_url:
-                if _sf_norm(display_track) == _sf_norm(np_track):
-                    banner_url = statsfm_banner_url
-                    if DEBUG: print("[LS] bannerwidgettop: stats.fm (fallback)")
+            if banner_url is None and statsfm_banner_url and same_as_sf:
+                banner_url = statsfm_banner_url
+                if DEBUG: print("[LS] bannerwidgettop: stats.fm (fallback)")
             # ──────────────────────────────────────────────────────────────────────────
 
             # --- bannerwidgettop: resolve final URL ---
@@ -911,14 +930,17 @@ def run_listening_stats() -> None:
                 banner_mini_url = AUDIODB_FALLBACK_URL
 
             # --- npcount: per-track play count + album title (stats.fm v2 API) ---
-            npcount_key = (display_track, display_artist)
-            if npcount_key != prev_npcount_key:
-                same_as_sf = (_sf_norm(display_track) == _sf_norm(np_track))
+            npcount_key = (display_track, display_artist, effective_sp_id)
+            should_refresh_npcount = (
+                npcount_key != prev_npcount_key
+                or (cached_npcount_val == 0 and same_as_sf and sf_track_id)
+            )
+            if should_refresh_npcount:
                 count = getTrackPlayCount(
                     effective_primary_artist,
                     display_track,
                     track_id=(sf_track_id if same_as_sf else None),
-                    spotify_track_id=(sp_track_id if same_as_sf else None),
+                    spotify_track_id=effective_sp_id,
                 )
                 scrobble_album = (
                     _EXPLICIT_RE.sub("", np_album).strip()
@@ -926,6 +948,8 @@ def run_listening_stats() -> None:
                 )
                 if DEBUG: print(
                     f"[LS] npcount raw → count={count}"
+                    f" | sp_id={effective_sp_id}"
+                    f" | same_as_sf={same_as_sf}"
                     f" | lanyard='{cached_lanyard_album}'"
                     f" | statsfm='{scrobble_album}'"
                 )
@@ -935,8 +959,9 @@ def run_listening_stats() -> None:
                 else:
                     album_title = scrobble_album
 
-                cached_npcount   = format_npcount(count, album_title, display_track)
-                prev_npcount_key = npcount_key
+                cached_npcount     = format_npcount(count, album_title, display_track)
+                cached_npcount_val = count
+                prev_npcount_key   = npcount_key
                 print(f"[LS] npcount: {cached_npcount}")
 
             # Expose current artist info to the TA thread
@@ -991,8 +1016,11 @@ def run_listening_stats() -> None:
                 if banner_mini_url:
                     dynamic.append({"type": 3, "name": "bannermini", "value": {"url": banner_mini_url}})
 
-                discordPatch(LS_APPLICATION_ID, LS_BOT_TOKEN, {"data": {"dynamic": dynamic}}, "LS")
-                prev_payload = current_payload
+                status = discordPatch(LS_APPLICATION_ID, LS_BOT_TOKEN, {"data": {"dynamic": dynamic}}, "LS")
+                if 200 <= status < 300:
+                    prev_payload = current_payload
+                else:
+                    print(f"[LS] PATCH failed (status={status}) — will retry on next poll")
             else:
                 if DEBUG: print("[LS] No changes, skip")
 
@@ -1099,8 +1127,11 @@ def run_top_artists() -> None:
                 fp = tuple((item["artist"]["name"], item["playedMs"]) for item in items)
                 if fp != prev_static_payload:
                     print(f"[TA] Data changed, pushing | range={current_range}")
-                    discordPatch(TA_APPLICATION_ID, TA_BOT_TOKEN, {"data": {"dynamic": dynamic}}, "TA")
-                    prev_static_payload = fp
+                    status = discordPatch(TA_APPLICATION_ID, TA_BOT_TOKEN, {"data": {"dynamic": dynamic}}, "TA")
+                    if 200 <= status < 300:
+                        prev_static_payload = fp
+                    else:
+                        print(f"[TA] PATCH failed (status={status}) — will retry on next poll")
                 else:
                     if DEBUG: print("[TA] No changes, skip")
                 time.sleep(STATIC_INTERVAL)

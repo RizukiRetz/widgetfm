@@ -28,6 +28,27 @@ DEFAULT_HEADERS  = {
 _track_stats_cache: dict[int, tuple[float, int]] = {}
 _TRACK_STATS_TTL = 180.0   # 3 minutes (short enough to reflect new plays quickly)
 
+# In-memory mapping: spotify_track_id → statsfm_track_id (populated automatically
+# from streams/current, streams/recent, and top/tracks so placeholder titles like
+# "Track 2" or "Unknown" artist entries still resolve play counts accurately).
+_spotify_to_statsfm_id: dict[str, int] = {}
+_recent50_cache: tuple[float, list]    = (0.0, [])
+_RECENT50_TTL                          = 45.0
+_top_tracks_cache: dict[str, tuple[float, list]] = {}
+_TOP_TRACKS_TTL                        = 300.0
+
+
+def _remember_track(track: dict) -> None:
+    """Record spotify_track_id → statsfm_track_id mappings from any stats.fm track object."""
+    tid = track.get("id")
+    if not isinstance(tid, int):
+        return
+    sp_ids = (track.get("externalIds") or {}).get("spotify") or []
+    if isinstance(sp_ids, list):
+        for sid in sp_ids:
+            if sid:
+                _spotify_to_statsfm_id[sid] = tid
+
 
 def _norm(s: str) -> str:
     """Strip non-alphanumeric chars and lowercase for loose track/artist matching."""
@@ -112,6 +133,7 @@ def get_user_stats(
 
 def _extract_track_fields(track: dict) -> dict:
     """Normalize a stats.fm track object into a flat dict for upstats.py."""
+    _remember_track(track)
     artists = track.get("artists") or []
     albums  = track.get("albums")  or []
 
@@ -124,9 +146,10 @@ def _extract_track_fields(track: dict) -> dict:
     album_image  = (albums[0].get("image") or "").strip() if albums else ""
     artist_image = (artists[0].get("image") or "").strip() if artists else ""
 
-    ext_ids    = track.get("externalIds") or {}
-    sp_ids     = ext_ids.get("spotify") or []
-    spotify_id = sp_ids[0] if isinstance(sp_ids, list) and sp_ids else None
+    ext_ids     = track.get("externalIds") or {}
+    raw_sp_ids  = ext_ids.get("spotify") or []
+    spotify_ids = [s for s in raw_sp_ids if s] if isinstance(raw_sp_ids, list) else []
+    spotify_id  = spotify_ids[0] if spotify_ids else None
 
     return {
         "track":          (track.get("name") or "").strip(),
@@ -137,6 +160,7 @@ def _extract_track_fields(track: dict) -> dict:
         "artist_image":   artist_image or None,
         "track_id":       track.get("id"),
         "spotify_id":     spotify_id,
+        "spotify_ids":    spotify_ids,
     }
 
 
@@ -163,6 +187,16 @@ def get_current_stream(
         if not item or not item.get("track"):
             return False, None
         is_playing = bool(item.get("isPlaying", True))
+        # Stale guard: if stats.fm reports progressMs >= durationMs, treat as finished
+        progress_ms = item.get("progressMs")
+        duration_ms = item.get("durationMs") or (item["track"].get("durationMs"))
+        if (
+            isinstance(progress_ms, (int, float))
+            and isinstance(duration_ms, (int, float))
+            and duration_ms > 0
+            and progress_ms >= duration_ms
+        ):
+            is_playing = False
         return is_playing, _extract_track_fields(item["track"])
     except Exception:
         return False, None
@@ -297,6 +331,84 @@ def search_track_id(
         return None
 
 
+def resolve_track_id_from_user_history(
+    username: str,
+    spotify_track_id: str | None,
+    api_base: str = DEFAULT_API_BASE,
+    headers: dict | None = None,
+) -> int | None:
+    """Resolve a stats.fm numeric track ID using the user's own streams & top tracks.
+
+    Matches strictly by Spotify Track ID (externalIds.spotify), which succeeds even
+    when stats.fm still shows a placeholder title ('Track 2'), an 'Unknown' artist,
+    or a common title buried outside global /search top-5 results.
+    """
+    global _recent50_cache
+
+    if not username or not spotify_track_id:
+        return None
+
+    # 1. Instant hit from in-memory map
+    cached_id = _spotify_to_statsfm_id.get(spotify_track_id)
+    if cached_id:
+        return cached_id
+
+    hdrs     = headers or DEFAULT_HEADERS
+    user_enc = urllib.parse.quote(username, safe="")
+    now      = time.time()
+
+    # 2. Scan /users/{u}/streams/recent?limit=50 (cached 45s)
+    ts_r, items_r = _recent50_cache
+    if not items_r or (now - ts_r) >= _RECENT50_TTL:
+        try:
+            r = requests.get(
+                f"{api_base}/users/{user_enc}/streams/recent",
+                params={"limit": 50},
+                headers=hdrs,
+                timeout=10,
+            )
+            if r.status_code == 200:
+                items_r = r.json().get("items") or []
+                _recent50_cache = (now, items_r)
+                for item in items_r:
+                    t = item.get("track")
+                    if isinstance(t, dict):
+                        _remember_track(t)
+        except Exception:
+            pass
+
+    cached_id = _spotify_to_statsfm_id.get(spotify_track_id)
+    if cached_id:
+        return cached_id
+
+    # 3. Scan /users/{u}/top/tracks for weeks & months (cached 5m each)
+    for rng in ("weeks", "months"):
+        ts_t, items_t = _top_tracks_cache.get(rng, (0.0, []))
+        if not items_t or (now - ts_t) >= _TOP_TRACKS_TTL:
+            try:
+                r = requests.get(
+                    f"{api_base}/users/{user_enc}/top/tracks",
+                    params={"range": rng},
+                    headers=hdrs,
+                    timeout=10,
+                )
+                if r.status_code == 200:
+                    items_t = r.json().get("items") or []
+                    _top_tracks_cache[rng] = (now, items_t)
+                    for item in items_t:
+                        t = item.get("track")
+                        if isinstance(t, dict):
+                            _remember_track(t)
+            except Exception:
+                pass
+
+        cached_id = _spotify_to_statsfm_id.get(spotify_track_id)
+        if cached_id:
+            return cached_id
+
+    return None
+
+
 def get_track_play_count(
     username: str,
     track_id: int | None = None,
@@ -309,13 +421,25 @@ def get_track_play_count(
 ) -> int:
     """Return the user's lifetime play count for a track from stats.fm.
 
-    If track_id is not provided, resolves it via search_track_id().
+    Resolution order when track_id is not provided:
+      1. User's own recent streams & top tracks matched by Spotify Track ID
+         (handles placeholder titles like 'Track 2', 'Unknown' artists, and
+         common-title collisions that miss global /search).
+      2. Global stats.fm track search (search_track_id).
     Returns 0 if not found or on any network error.
     """
     if not username:
         return 0
 
     hdrs = headers or DEFAULT_HEADERS
+
+    if not track_id and spotify_track_id:
+        track_id = resolve_track_id_from_user_history(
+            username,
+            spotify_track_id,
+            api_base=api_base,
+            headers=hdrs,
+        )
 
     if not track_id and title:
         track_id = search_track_id(

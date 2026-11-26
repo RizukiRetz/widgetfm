@@ -21,66 +21,86 @@ Fallthrough (returns all None) when:
   • Any network / timeout error.
 """
 
+import time
 import requests
 
 LANYARD_API = "https://api.lanyard.rest/v1/users"
 
 
-def get_lanyard_album_art(
+def get_lanyard_presence(
     user_id: str,
-) -> tuple[str | None, str | None, str | None, str | None]:
-    """Return (art_url, album, song, artist) from the user's Lanyard Spotify presence.
+) -> tuple[str | None, str | None, str | None, str | None, str | None]:
+    """Return (art_url, album, song, artist, track_id) from Lanyard Spotify presence.
 
     All values come directly from Spotify Rich Presence via Discord:
-      - art_url : 640×640 album art (Spotify CDN)
-      - album   : album name — always correct, never mislabeled as "Single"
-      - song    : track name as shown on Spotify
-      - artist  : artist string; Lanyard joins collaborators with '; '
-                  → returned with '; ' replaced by ', ' for display
+      - art_url  : 640×640 album art (Spotify CDN)
+      - album    : album name — always correct, never mislabeled as "Single"
+      - song     : track name as shown on Spotify
+      - artist   : artist string; Lanyard joins collaborators with '; '
+                   → returned with '; ' replaced by ', ' for display
+      - track_id : Spotify track ID (e.g. '2Df1qZun61Mrj4xo6ndtTy')
 
-    Returns (None, None, None, None) when the user is not actively playing
-    Spotify via Discord (offline, not monitored, Private Session, etc.).
+    Also applies a stale-presence guard using spotify.timestamps.end so a track
+    whose end timestamp has already elapsed (>5s ago) is not treated as playing.
+
+    Returns (None, None, None, None, None) when the user is not actively playing
+    Spotify via Discord (offline, not monitored, Private Session, stale, etc.).
     """
     if not user_id:
-        return None, None, None, None
+        return None, None, None, None, None
 
     try:
         r = requests.get(f"{LANYARD_API}/{user_id}", timeout=10)
 
         if r.status_code != 200:
-            return None, None, None, None
+            return None, None, None, None, None
 
         data = r.json()
 
         # Lanyard error (user_not_monitored, etc.)
         if not data.get("success"):
-            return None, None, None, None
+            return None, None, None, None, None
 
         payload = data.get("data", {})
 
         # Offline / invisible → Discord hides all presence data
         if payload.get("discord_status") == "offline":
-            return None, None, None, None
+            return None, None, None, None, None
 
         # Not listening to Spotify (nothing playing, paused, Private Session)
         if not payload.get("listening_to_spotify"):
-            return None, None, None, None
+            return None, None, None, None, None
 
         sp = payload.get("spotify")
         if not sp:
-            return None, None, None, None
+            return None, None, None, None, None
 
-        art_url = sp.get("album_art_url") or None
-        album   = sp.get("album",  "").strip() or None
-        song    = sp.get("song",   "").strip() or None
+        # Stale-presence guard: if track end timestamp passed >5s ago, treat as stale
+        end_ts = (sp.get("timestamps") or {}).get("end")
+        if isinstance(end_ts, (int, float)) and end_ts > 0:
+            if end_ts < int(time.time() * 1000) - 5_000:
+                return None, None, None, None, None
+
+        art_url  = sp.get("album_art_url") or None
+        album    = sp.get("album",  "").strip() or None
+        song     = sp.get("song",   "").strip() or None
+        track_id = (sp.get("track_id") or "").strip() or None
 
         # Lanyard joins collaboration artists with "; " — replace with ", " for display.
         # e.g. "Wet Leg; horsegiirL" → "Wet Leg, horsegiirL"
         raw_artist = sp.get("artist", "").strip()
         artist = ", ".join(p.strip() for p in raw_artist.split(";")) if raw_artist else None
 
-        return art_url, album, song, artist
+        return art_url, album, song, artist, track_id
 
     except Exception as exc:
         print(f"[Lanyard] Error: {exc}")
-        return None, None, None, None
+        return None, None, None, None, None
+
+
+def get_lanyard_album_art(
+    user_id: str,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Backwards-compatible 4-tuple wrapper around get_lanyard_presence()."""
+    art_url, album, song, artist, _ = get_lanyard_presence(user_id)
+    return art_url, album, song, artist
